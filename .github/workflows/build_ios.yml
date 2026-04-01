@@ -1,0 +1,83 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.22.0'
+        channel: 'stable'
+        
+    - name: Install dependencies
+      run: flutter pub get
+      
+    - name: Create iOS project
+      run: |
+        # 如果 ios 目录不存在，创建它
+        if [ ! -d "ios" ]; then
+          flutter create . --platforms ios --org com.example.classroom
+        fi
+        
+    - name: Update Podfile for no codesign
+      run: |
+        cd ios
+        # 修改 Podfile 支持无签名构建
+        sed -i '' 's/ENABLE_BITCODE/ENABLE_BITCODE\n    config.build_settings["CODE_SIGNING_REQUIRED"] = "NO"\n    config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"/g' Podfile 2>/dev/null || true
+        
+    - name: Install CocoaPods
+      run: |
+        cd ios
+        pod install --repo-update || true
+        
+    - name: Build iOS (no codesign)
+      run: |
+        flutter build ios --release --no-codesign || \
+        xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -sdk iphoneos -destination generic/platform=iOS CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
+        
+    - name: Create IPA from app
+      run: |
+        APP_PATH="build/ios/iphoneos/Runner.app"
+        if [ ! -d "$APP_PATH" ]; then
+          APP_PATH="ios/build/Release-iphoneos/Runner.app"
+        fi
+        
+        if [ -d "$APP_PATH" ]; then
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r classroom_wifi_app.ipa Payload
+          rm -rf Payload
+          echo "IPA created successfully"
+          ls -lh classroom_wifi_app.ipa
+        else
+          echo "App not found at $APP_PATH"
+          find . -name "Runner.app" -type d 2>/dev/null
+          exit 1
+        fi
+        
+    - name: Upload IPA artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: classroom_wifi_app-ipa
+        path: classroom_wifi_app.ipa
+        retention-days: 30
+        
+    - name: Upload IPA to Release
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: classroom_wifi_app.ipa
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
