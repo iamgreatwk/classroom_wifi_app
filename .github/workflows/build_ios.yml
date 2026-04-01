@@ -7,6 +7,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-ios:
     runs-on: macos-latest
@@ -28,14 +31,16 @@ jobs:
       run: |
         # 如果 ios 目录不存在，创建它
         if [ ! -d "ios" ]; then
-          flutter create . --platforms ios --org com.example.classroom
+          flutter create --platforms ios --org com.example.classroom .
         fi
         
-    - name: Update Podfile for no codesign
+    - name: Configure iOS for no codesign
       run: |
         cd ios
-        # 修改 Podfile 支持无签名构建
-        sed -i '' 's/ENABLE_BITCODE/ENABLE_BITCODE\n    config.build_settings["CODE_SIGNING_REQUIRED"] = "NO"\n    config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"/g' Podfile 2>/dev/null || true
+        # 修改 Xcode 项目配置，禁用代码签名
+        sed -i '' 's/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = "";/g' Runner.xcodeproj/project.pbxproj 2>/dev/null || true
+        sed -i '' 's/CODE_SIGN_IDENTITY = .*/CODE_SIGN_IDENTITY = "";/g' Runner.xcodeproj/project.pbxproj 2>/dev/null || true
+        sed -i '' 's/CODE_SIGNING_REQUIRED = YES/CODE_SIGNING_REQUIRED = NO/g' Runner.xcodeproj/project.pbxproj 2>/dev/null || true
         
     - name: Install CocoaPods
       run: |
@@ -44,15 +49,11 @@ jobs:
         
     - name: Build iOS (no codesign)
       run: |
-        flutter build ios --release --no-codesign || \
-        xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -sdk iphoneos -destination generic/platform=iOS CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
+        flutter build ios --release --no-codesign
         
     - name: Create IPA from app
       run: |
         APP_PATH="build/ios/iphoneos/Runner.app"
-        if [ ! -d "$APP_PATH" ]; then
-          APP_PATH="ios/build/Release-iphoneos/Runner.app"
-        fi
         
         if [ -d "$APP_PATH" ]; then
           mkdir -p Payload
