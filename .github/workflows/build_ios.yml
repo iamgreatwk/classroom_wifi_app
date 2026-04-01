@@ -36,38 +36,23 @@ jobs:
           echo "iOS project already exists"
         fi
         
-    - name: Update Podfile minimum iOS version
-      run: |
-        cd ios
-        # 确保 Podfile 使用正确的 iOS 版本
-        if [ -f "Podfile" ]; then
-          sed -i '' 's/platform :ios, .*/platform :ios, '13.0'/g' Podfile
-          cat Podfile
-        fi
-        
-    - name: Configure iOS for no codesign
-      run: |
-        cd ios
-        # 修改 Xcode 项目配置，禁用代码签名
-        sed -i '' 's/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = "";/g' Runner.xcodeproj/project.pbxproj 2>/dev/null || true
-        sed -i '' 's/CODE_SIGN_IDENTITY = .*/CODE_SIGN_IDENTITY = "";/g' Runner.xcodeproj/project.pbxproj 2>/dev/null || true
-        sed -i '' 's/CODE_SIGNING_REQUIRED = YES/CODE_SIGNING_REQUIRED = NO/g' Runner.xcodeproj/project.pbxproj 2>/dev/null || true
-        sed -i '' 's/"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = .*/"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";/g' Runner.xcodeproj/project.pbxproj 2>/dev/null || true
-        
     - name: Install CocoaPods
       run: |
         cd ios
         pod install --repo-update || true
         
-    - name: Build iOS (no codesign)
+    - name: Build iOS for Simulator (no codesign needed)
       run: |
-        flutter build ios --release --no-codesign
+        # 构建模拟器版本，不需要签名和开发者账号
+        flutter build ios --simulator --release
         
     - name: Create IPA from app
       run: |
-        APP_PATH="build/ios/iphoneos/Runner.app"
+        # 模拟器版本路径不同
+        APP_PATH="build/ios/iphonesimulator/Runner.app"
         
         if [ -d "$APP_PATH" ]; then
+          echo "Found simulator app at $APP_PATH"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r classroom_wifi_app.ipa Payload
@@ -76,6 +61,7 @@ jobs:
           ls -lh classroom_wifi_app.ipa
         else
           echo "App not found at $APP_PATH"
+          echo "Searching for any .app files..."
           find . -name "*.app" -type d 2>/dev/null
           exit 1
         fi
