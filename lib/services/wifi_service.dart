@@ -57,4 +57,10 @@ class WifiService {
   void dispose() {
     stopScan();
   }
+
+  /// 检查权限（iOS/Android 需要，Web 直接返回 true）
+  Future<bool> checkPermissions() async {
+    // Web 平台不需要权限检查
+    return true;
+  }
 }
