@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 env:
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-ios:
@@ -27,35 +27,62 @@ jobs:
     - name: Install dependencies
       run: flutter pub get
       
+    - name: Check if iOS directory exists
+      run: |
+        if [ -d "ios" ]; then
+          echo "iOS directory exists"
+          ls -la ios/
+        else
+          echo "iOS directory does not exist, will create"
+        fi
+        
     - name: Create iOS project
       run: |
         # 如果 ios 目录不存在，创建它
         if [ ! -d "ios" ]; then
+          echo "Creating iOS project..."
           flutter create --platforms ios --org com.example.classroom .
+        else
+          echo "iOS project already exists"
         fi
         
     - name: Configure iOS for no codesign
       run: |
         cd ios
+        echo "Configuring iOS project for no codesign..."
         # 修改 Xcode 项目配置，禁用代码签名
         sed -i '' 's/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = "";/g' Runner.xcodeproj/project.pbxproj 2>/dev/null || true
         sed -i '' 's/CODE_SIGN_IDENTITY = .*/CODE_SIGN_IDENTITY = "";/g' Runner.xcodeproj/project.pbxproj 2>/dev/null || true
         sed -i '' 's/CODE_SIGNING_REQUIRED = YES/CODE_SIGNING_REQUIRED = NO/g' Runner.xcodeproj/project.pbxproj 2>/dev/null || true
+        echo "Configuration done"
         
     - name: Install CocoaPods
       run: |
         cd ios
-        pod install --repo-update || true
+        echo "Installing CocoaPods..."
+        pod install --repo-update || echo "Pod install failed or not needed"
         
     - name: Build iOS (no codesign)
       run: |
-        flutter build ios --release --no-codesign
+        echo "Building iOS..."
+        flutter build ios --release --no-codesign --verbose || {
+          echo "Flutter build failed, trying xcodebuild directly..."
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -sdk iphoneos -destination generic/platform=iOS CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
+        }
+        
+    - name: Find built app
+      run: |
+        echo "Looking for built app..."
+        find . -name "Runner.app" -type d 2>/dev/null || echo "No Runner.app found"
+        ls -la build/ios/iphoneos/ 2>/dev/null || echo "build/ios/iphoneos/ not found"
         
     - name: Create IPA from app
       run: |
         APP_PATH="build/ios/iphoneos/Runner.app"
         
         if [ -d "$APP_PATH" ]; then
+          echo "Found app at $APP_PATH"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r classroom_wifi_app.ipa Payload
@@ -64,7 +91,8 @@ jobs:
           ls -lh classroom_wifi_app.ipa
         else
           echo "App not found at $APP_PATH"
-          find . -name "Runner.app" -type d 2>/dev/null
+          echo "Searching for any .app files..."
+          find . -name "*.app" -type d 2>/dev/null
           exit 1
         fi
         
