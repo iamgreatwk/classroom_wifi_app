@@ -10,6 +10,7 @@ import '../providers/app_provider.dart';
 import '../services/excel_parser_service.dart';
 import '../services/web_download_service.dart';
 import '../services/screenshot_service.dart';
+import '../services/canvas_screenshot_service.dart';
 import 'course_display_screen.dart';
 import 'dart:js' as js;
 
@@ -389,10 +390,10 @@ class _OverviewScreenState extends State<OverviewScreen> {
       
       Uint8List? imageBytes;
       
-      // 检测是否为 iOS Safari（html2canvas 在 iOS 上更可靠）
+      // 检测是否为 iOS Safari（使用原生 Canvas API，兼容性最好）
       if (_isIOSSafari()) {
-        debugPrint('Using html2canvas for iOS Safari');
-        imageBytes = await ScreenshotService.capturePage();
+        debugPrint('Using native Canvas API for iOS');
+        imageBytes = await _captureWithCanvasAPI();
       } else {
         // 桌面端使用 Flutter 原生方法
         debugPrint('Using Flutter RepaintBoundary for desktop');
@@ -440,6 +441,95 @@ class _OverviewScreenState extends State<OverviewScreen> {
     } catch (e) {
       return false;
     }
+  }
+  
+  /// 使用原生 Canvas API 捕获表格（iOS 兼容方案）
+  Future<Uint8List?> _captureWithCanvasAPI() async {
+    try {
+      final provider = context.read<AppProvider>();
+      final allClassrooms = provider.classrooms;
+      
+      if (allClassrooms.isEmpty) {
+        debugPrint('No classrooms to capture');
+        return null;
+      }
+      
+      // 获取当前选中的分页教室
+      final pages = _getFilteredPages(allClassrooms, provider);
+      final selectedPages = provider.selectedOverviewPages;
+      
+      // 合并所有选中分页的教室
+      final Set<Classroom> uniqueClassrooms = {};
+      for (final pageName in selectedPages) {
+        final pageEntry = pages.firstWhere(
+          (p) => p.key == pageName,
+          orElse: () => MapEntry(pageName, []),
+        );
+        uniqueClassrooms.addAll(pageEntry.value);
+      }
+      
+      final classrooms = _getSortedClassrooms(uniqueClassrooms.toList());
+      
+      if (classrooms.isEmpty) {
+        debugPrint('No classrooms in selected pages');
+        return null;
+      }
+      
+      // 构建表头
+      final headers = ['教室', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
+      
+      // 构建数据行和颜色
+      final rows = <List<String>>[];
+      final rowColors = <ColorInfo>[];
+      final now = DateTime.now();
+      final weekday = now.weekday;
+      for (int i = 0; i < classrooms.length; i++) {
+        final classroom = classrooms[i];
+        final row = <String>[classroom.name];
+        String? rowBgColor;
+        
+        for (int period = 1; period <= 12; period++) {
+          final course = classroom.getCourseAtPeriod(weekday.toString(), period);
+          if (course != null) {
+            row.add('${course.name}-${course.teacher}');
+            // 获取该节次的颜色
+            if (rowBgColor == null) {
+              rowBgColor = _getColorHexForPeriod(period);
+            }
+          } else {
+            row.add('');
+          }
+        }
+        
+        rows.add(row);
+        
+        // 添加颜色信息
+        if (rowBgColor != null) {
+          rowColors.add(ColorInfo(
+            index: i,
+            bgColor: rowBgColor,
+            textColor: '#FFFFFF',
+          ));
+        }
+      }
+      
+      debugPrint('Capturing ${classrooms.length} classrooms with Canvas API');
+      return await CanvasScreenshotService.captureTable(
+        headers: headers,
+        rows: rows,
+        rowColors: rowColors,
+      );
+    } catch (e, stackTrace) {
+      debugPrint('Canvas API capture error: $e');
+      debugPrint(stackTrace.toString());
+      return null;
+    }
+  }
+  
+  /// 获取节次对应的颜色 Hex
+  String _getColorHexForPeriod(int period) {
+    final color = _getPeriodColor(period);
+    return '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
   }
   
   /// 使用 RepaintBoundary 捕获 Widget 为 PNG 图片
