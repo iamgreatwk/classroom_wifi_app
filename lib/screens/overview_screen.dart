@@ -1,9 +1,14 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
 import '../models/course.dart';
 import '../models/reminder.dart';
 import '../providers/app_provider.dart';
 import '../services/excel_parser_service.dart';
+import '../services/web_download_service.dart';
 import 'course_display_screen.dart';
 
 /// 总览页面 - 显示所有教室1-12节详细情况
@@ -17,6 +22,9 @@ class OverviewScreen extends StatefulWidget {
 class _OverviewScreenState extends State<OverviewScreen> {
   /// 是否已经初始化默认分页
   bool _hasInitializedDefaultPage = false;
+  
+  /// GlobalKey for capturing the overview widget
+  final GlobalKey _screenshotKey = GlobalKey();
 
 
 
@@ -364,12 +372,80 @@ class _OverviewScreenState extends State<OverviewScreen> {
     return false;
   }
 
+  /// 下载总览页面为图片
+  Future<void> _downloadOverviewImage() async {
+    try {
+      // 使用 RepaintBoundary 捕获 Widget 为图片
+      final Uint8List? imageBytes = await _captureWidgetToImage();
+      
+      if (imageBytes != null) {
+        final String fileName = '总览_${DateTime.now().millisecondsSinceEpoch}.png';
+        await WebDownloadService.downloadBytes(imageBytes, fileName);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('图片已下载')),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('截图失败，请重试')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('下载失败: $e')),
+        );
+      }
+    }
+  }
+  
+  /// 使用 RepaintBoundary 捕获 Widget 为 PNG 图片
+  Future<Uint8List?> _captureWidgetToImage() async {
+    try {
+      // 查找 RenderRepaintBoundary
+      final RenderRepaintBoundary? boundary = 
+          _screenshotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      
+      if (boundary == null) {
+        debugPrint('RenderRepaintBoundary not found');
+        return null;
+      }
+      
+      // 捕获为图片
+      final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
+      
+      // 转换为 PNG 字节
+      final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      
+      if (byteData == null) {
+        debugPrint('Failed to convert image to byte data');
+        return null;
+      }
+      
+      return byteData.buffer.asUint8List();
+    } catch (e) {
+      debugPrint('Error capturing widget: $e');
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('今日总览'),
         backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.download),
+            tooltip: '下载为图片',
+            onPressed: _downloadOverviewImage,
+          ),
+        ],
       ),
       body: Consumer<AppProvider>(
         builder: (context, provider, _) {
@@ -414,10 +490,12 @@ class _OverviewScreenState extends State<OverviewScreen> {
 
 
 
-          return Column(
-            children: [
-              // 分页选择器
-              Container(
+          return RepaintBoundary(
+            key: _screenshotKey,
+            child: Column(
+              children: [
+                // 分页选择器
+                Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: Column(
@@ -575,6 +653,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
                 ),
               ),
             ],
+            ),
           );
         },
       ),
