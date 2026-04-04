@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -10,8 +11,6 @@ import '../providers/app_provider.dart';
 import '../services/excel_parser_service.dart';
 import '../services/web_download_service.dart';
 import '../services/screenshot_service.dart';
-import '../services/canvas_screenshot_service.dart';
-import '../services/overview_excel_service.dart' as excel_service;
 import 'course_display_screen.dart';
 import 'dart:js' as js;
 
@@ -377,39 +376,114 @@ class _OverviewScreenState extends State<OverviewScreen> {
   }
 
   /// 下载总览页面为 Excel 文件（最可靠的跨平台方案）
+  /// 使用 JavaScript Canvas 直接绘制表格截图（绕过 Flutter 渲染层）
   Future<void> _downloadOverviewImage() async {
     try {
-      // 显示加载提示
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('正在生成截图...'), duration: Duration(seconds: 2)),
         );
       }
       
-      // 延迟一小段时间确保 Widget 已经渲染
-      await Future.delayed(const Duration(milliseconds: 300));
+      // 获取数据
+      final provider = context.read<AppProvider>();
+      final allClassrooms = provider.classrooms;
       
-      // 使用 Flutter 原生的 RepaintBoundary.toImage() 方法截图
-      // 这个方法在 Web 平台也支持，比 JavaScript 方案更可靠
-      debugPrint('Using Flutter RepaintBoundary for screenshot');
-      final imageBytes = await _captureWidgetToImage();
-      
-      if (imageBytes != null) {
-        final String fileName = '总览_${DateTime.now().millisecondsSinceEpoch}.png';
-        
-        if (kIsWeb) {
-          // Web 平台下载
-          await WebDownloadService.downloadBytes(imageBytes, fileName);
-        } else {
-          // 移动端原生应用下载
-          await WebDownloadService.downloadBytes(imageBytes, fileName);
-        }
-        
+      if (allClassrooms.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('截图已下载')),
+            const SnackBar(content: Text('没有课表数据')),
           );
         }
+        return;
+      }
+      
+      final pages = _getFilteredPages(allClassrooms, provider);
+      final selectedPages = provider.selectedOverviewPages;
+      final now = DateTime.now();
+      final weekday = ExcelParserService.getWeekdayName(now);
+      
+      // 合并选中的教室
+      final Set<Classroom> uniqueClassrooms = {};
+      for (final pageName in selectedPages) {
+        final pageEntry = pages.firstWhere(
+          (p) => p.key == pageName,
+          orElse: () => MapEntry(pageName, []),
+        );
+        uniqueClassrooms.addAll(pageEntry.value);
+      }
+      
+      final sortedClassrooms = _getSortedClassrooms(uniqueClassrooms.toList());
+      final absentMap = provider.absentClassrooms;
+      
+      // 构建表头
+      final headers = ['教室', '1-2', '3-4', '5', '6-7', '8-9', '10-12'];
+      
+      // 构建数据行
+      final rows = <List<String>>[];
+      final rowColors = <Map<String, dynamic>>[];
+      
+      for (final classroom in sortedClassrooms) {
+        final row = <String>[];
+        
+        for (final periodGroup in [1, 2, 3, 4, 5, 6, 7]) {
+          if (periodGroup == 1) {
+            row.add(classroom.name);
+          } else {
+            final periods = _getPeriodsForGroup(periodGroup);
+            final courses = <String>[];
+            final teacherSet = <String>{};
+            
+            for (final period in periods) {
+              final course = classroom.getCourseAtPeriod(weekday, period);
+              if (course != null) {
+                courses.add(course.name);
+                if (course.teacher != null && course.teacher!.isNotEmpty) {
+                  teacherSet.add(course.teacher!);
+                }
+              }
+            }
+            
+            if (courses.isEmpty) {
+              row.add('');
+            } else {
+              final uniqueCourses = courses.toSet().toList();
+              final displayText = uniqueCourses.length > 1
+                  ? uniqueCourses.take(2).join('\n')
+                  : uniqueCourses.first;
+              row.add(displayText);
+            }
+          }
+        }
+        
+        rows.add(row);
+        
+        // 检查是否有缺勤标记
+        final hasAbsence = absentMap.entries.any((entry) {
+          final parts = entry.key.toString().split('_');
+          if (parts.length >= 2) {
+            final absenceWeekday = parts[0];
+            final absenceClassroom = parts.sublist(1).join('_');
+            return absenceWeekday == weekday &&
+                   absenceClassroom == classroom.name &&
+                   (entry.value as List).isNotEmpty;
+          }
+          return false;
+        });
+        
+        rowColors.add({
+          'classroomName': classroom.name,
+          'hasAbsence': hasAbsence,
+        });
+      }
+      
+      // 调用 JavaScript 绘制截图
+      final success = await _captureWithJS(headers, rows, rowColors, weekday);
+      
+      if (success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('截图已下载')),
+        );
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('截图失败，请重试')),
@@ -425,88 +499,217 @@ class _OverviewScreenState extends State<OverviewScreen> {
     }
   }
   
-  /// 导出为 Excel 文件（截图失败时的备选方案）
-  Future<bool> _exportToExcel() async {
+  /// 获取节次组对应的节次列表
+  List<int> _getPeriodsForGroup(int group) {
+    switch (group) {
+      case 2: return [1, 2];
+      case 3: return [3, 4];
+      case 4: return [5];
+      case 5: return [6, 7];
+      case 6: return [8, 9];
+      case 7: return [10, 11, 12];
+      default: return [];
+    }
+  }
+  
+  /// 使用 JavaScript Canvas 绘制并下载截图
+  Future<bool> _captureWithJS(
+    List<String> headers,
+    List<List<String>> rows,
+    List<Map<String, dynamic>> rowColors,
+    String weekday,
+  ) async {
     try {
-      final provider = context.read<AppProvider>();
-      final allClassrooms = provider.classrooms;
+      final completer = Completer<bool>();
       
-      if (allClassrooms.isEmpty) {
-        debugPrint('No classrooms to export');
-        return false;
-      }
+      // 准备颜色配置
+      final colorsJson = rowColors.map((c) {
+        return {
+          'name': c['classroomName'],
+          'hasAbsence': c['hasAbsence'],
+        };
+      }).toList();
       
-      // 获取当前选中的分页教室
-      final pages = _getFilteredPages(allClassrooms, provider);
-      final selectedPages = provider.selectedOverviewPages;
+      // JavaScript 回调
+      js.context['__screenshotSuccess'] = js.allowInterop((String dataUrl) {
+        completer.complete(true);
+        js.context.deleteProperty('__screenshotSuccess');
+        js.context.deleteProperty('__screenshotError');
+      });
       
-      // 合并所有选中分页的教室
-      final Set<Classroom> uniqueClassrooms = {};
-      for (final pageName in selectedPages) {
-        final pageEntry = pages.firstWhere(
-          (p) => p.key == pageName,
-          orElse: () => MapEntry(pageName, []),
-        );
-        uniqueClassrooms.addAll(pageEntry.value);
-      }
+      js.context['__screenshotError'] = js.allowInterop((String error) {
+        debugPrint('Screenshot JS error: $error');
+        completer.complete(false);
+        js.context.deleteProperty('__screenshotSuccess');
+        js.context.deleteProperty('__screenshotError');
+      });
       
-      final classrooms = _getSortedClassrooms(uniqueClassrooms.toList());
-      
-      if (classrooms.isEmpty) {
-        debugPrint('No classrooms in selected pages');
-        return false;
-      }
-      
-      // 构建表头
-      final headers = ['教室', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
-      
-      // 构建数据行和颜色
-      final rows = <List<String>>[];
-      final rowColors = <excel_service.ColorInfo>[];
-      final now = DateTime.now();
-      final weekday = now.weekday;
-      
-      for (int i = 0; i < classrooms.length; i++) {
-        final classroom = classrooms[i];
-        final row = <String>[classroom.name];
-        String? rowBgColor;
-        
-        for (int period = 1; period <= 12; period++) {
-          final course = classroom.getCourseAtPeriod(weekday.toString(), period);
-          if (course != null) {
-            row.add('${course.name}-${course.teacher}');
-            // 获取该节次的颜色
-            if (rowBgColor == null) {
-              rowBgColor = _getColorHexForPeriod(period);
-            }
-          } else {
-            row.add('');
+      // 执行 Canvas 绘制
+      js.context.callMethod('eval', ['''
+        (function() {
+          try {
+            const headers = ${js.context['JSON'].callMethod('stringify', [headers])};
+            const rows = ${js.context['JSON'].callMethod('stringify', [rows])};
+            const colorsJson = ${js.context['JSON'].callMethod('stringify', [colorsJson])};
+            
+            // 尺寸配置
+            const classroomColWidth = 80;
+            const periodColWidth = 120;
+            const headerHeight = 50;
+            const rowHeight = 36;
+            const padding = 20;
+            const cornerRadius = 4;
+            
+            const canvasWidth = classroomColWidth + periodColWidth * 5 + padding * 2;
+            const canvasHeight = headerHeight + rows.length * rowHeight + padding * 2 + 60;
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            const ctx = canvas.getContext('2d');
+            
+            // 白色背景
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 标题
+            ctx.fillStyle = '#1a1a1a';
+            ctx.font = 'bold 20px Arial, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('${weekday}总览', canvasWidth / 2, padding + 25);
+            
+            let y = padding + 50;
+            
+            // 表头背景
+            ctx.fillStyle = '#e8e8e8';
+            ctx.beginPath();
+            ctx.roundRect(padding, y, canvasWidth - padding * 2, headerHeight, [cornerRadius, cornerRadius, 0, 0]);
+            ctx.fill();
+            
+            // 表头文字
+            ctx.fillStyle = '#333333';
+            ctx.font = 'bold 14px Arial, sans-serif';
+            ctx.textAlign = 'center';
+            
+            let x = padding;
+            const colWidths = [classroomColWidth, periodColWidth, periodColWidth, periodColWidth, periodColWidth, periodColWidth];
+            
+            headers.forEach((header, i) => {
+              const colWidth = colWidths[Math.min(i, colWidths.length - 1)];
+              ctx.fillText(header, x + colWidth / 2, y + headerHeight / 2 + 5);
+              x += colWidth;
+            });
+            
+            y += headerHeight;
+            
+            // 数据行
+            rows.forEach((row, rowIndex) => {
+              const colorInfo = colorsJson[rowIndex];
+              const hasAbsence = colorInfo && colorInfo.hasAbsence;
+              
+              // 行背景（交替色）
+              ctx.fillStyle = rowIndex % 2 === 0 ? '#fafafa' : '#ffffff';
+              ctx.fillRect(padding, y, canvasWidth - padding * 2, rowHeight);
+              
+              // 缺勤标记行特殊背景
+              if (hasAbsence) {
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.15)';
+                ctx.fillRect(padding, y, canvasWidth - padding * 2, rowHeight);
+              }
+              
+              x = padding;
+              
+              row.forEach((cell, colIndex) => {
+                const colWidth = colWidths[Math.min(colIndex, colWidths.length - 1)];
+                
+                // 单元格边框
+                ctx.strokeStyle = '#e0e0e0';
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x, y + rowHeight);
+                ctx.stroke();
+                
+                // 单元格文字
+                if (cell && cell.length > 0) {
+                  ctx.fillStyle = colIndex === 0 ? '#333333' : '#1a1a1a';
+                  ctx.font = colIndex === 0 ? 'bold 12px Arial, sans-serif' : '12px Arial, sans-serif';
+                  ctx.textAlign = 'center';
+                  
+                  // 处理多行文本
+                  const lines = cell.split('\\n');
+                  const lineHeight = 14;
+                  const startY = y + rowHeight / 2 - (lines.length - 1) * lineHeight / 2;
+                  
+                  lines.forEach((line, lineIndex) => {
+                    // 文字截断
+                    let displayText = line;
+                    const maxWidth = colWidth - 10;
+                    if (ctx.measureText(displayText).width > maxWidth) {
+                      while (ctx.measureText(displayText + '..').width > maxWidth && displayText.length > 0) {
+                        displayText = displayText.slice(0, -1);
+                      }
+                      displayText += '..';
+                    }
+                    ctx.fillText(displayText, x + colWidth / 2, startY + lineIndex * lineHeight + 4);
+                  });
+                }
+                
+                x += colWidth;
+              });
+              
+              // 右侧边框
+              ctx.strokeStyle = '#e0e0e0';
+              ctx.lineWidth = 0.5;
+              ctx.beginPath();
+              ctx.moveTo(x, y);
+              ctx.lineTo(x, y + rowHeight);
+              ctx.stroke();
+              
+              // 底部边框
+              ctx.beginPath();
+              ctx.moveTo(padding, y + rowHeight);
+              ctx.lineTo(padding + classroomColWidth + periodColWidth * 5, y + rowHeight);
+              ctx.stroke();
+              
+              y += rowHeight;
+            });
+            
+            // 底部边框
+            ctx.strokeStyle = '#cccccc';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(padding, y);
+            ctx.lineTo(padding + classroomColWidth + periodColWidth * 5, y);
+            ctx.stroke();
+            
+            // 下载图片
+            const dataUrl = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            const timestamp = Date.now();
+            link.download = '总览_' + timestamp + '.png';
+            link.href = dataUrl;
+            link.click();
+            
+            window.__screenshotSuccess(dataUrl);
+          } catch (e) {
+            window.__screenshotError(e.message || e.toString());
           }
-        }
-        
-        rows.add(row);
-        
-        // 添加颜色信息
-        if (rowBgColor != null) {
-          rowColors.add(excel_service.ColorInfo(
-            index: i,
-            bgColor: rowBgColor,
-          ));
-        }
-      }
+        })()
+      ''']);
       
-      debugPrint('Exporting ${classrooms.length} classrooms to Excel');
-      final String fileName = '总览_${DateTime.now().millisecondsSinceEpoch}';
+      // 超时处理
+      Future.delayed(const Duration(seconds: 15), () {
+        if (!completer.isCompleted) {
+          completer.complete(false);
+          js.context.deleteProperty('__screenshotSuccess');
+          js.context.deleteProperty('__screenshotError');
+        }
+      });
       
-      return await excel_service.OverviewExcelService.exportToExcel(
-        headers: headers,
-        rows: rows,
-        rowColors: rowColors,
-        fileName: fileName,
-      );
-    } catch (e, stackTrace) {
-      debugPrint('Excel export error: $e');
-      debugPrint(stackTrace.toString());
+      return completer.future;
+    } catch (e) {
+      debugPrint('_captureWithJS error: $e');
       return false;
     }
   }
