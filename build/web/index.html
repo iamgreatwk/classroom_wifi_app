@@ -34,6 +34,34 @@
   
   <!-- html2canvas for screenshot support on iOS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  
+  <!-- Screenshot helper function -->
+  <script>
+    // 全局截图函数，供 Flutter 调用
+    window.captureScreenshot = function() {
+      return new Promise(function(resolve, reject) {
+        if (typeof html2canvas === 'undefined') {
+          reject('html2canvas not loaded');
+          return;
+        }
+        
+        html2canvas(document.body, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: '#ffffff',
+          logging: true,
+          width: window.innerWidth,
+          height: window.innerHeight
+        }).then(function(canvas) {
+          var dataUrl = canvas.toDataURL('image/png');
+          resolve(dataUrl);
+        }).catch(function(err) {
+          reject('html2canvas error: ' + err);
+        });
+      });
+    };
+  </script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
