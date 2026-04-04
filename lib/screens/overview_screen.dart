@@ -9,7 +9,9 @@ import '../models/reminder.dart';
 import '../providers/app_provider.dart';
 import '../services/excel_parser_service.dart';
 import '../services/web_download_service.dart';
+import '../services/screenshot_service.dart';
 import 'course_display_screen.dart';
+import 'dart:js' as js;
 
 /// 总览页面 - 显示所有教室1-12节详细情况
 class OverviewScreen extends StatefulWidget {
@@ -378,15 +380,24 @@ class _OverviewScreenState extends State<OverviewScreen> {
       // 显示加载提示
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('正在生成图片...'), duration: Duration(seconds: 1)),
+          const SnackBar(content: Text('正在生成图片...'), duration: Duration(seconds: 2)),
         );
       }
       
       // 延迟一小段时间确保 Widget 已经渲染
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future.delayed(const Duration(milliseconds: 300));
       
-      // 使用 RepaintBoundary 捕获 Widget 为图片
-      final Uint8List? imageBytes = await _captureWidgetToImage();
+      Uint8List? imageBytes;
+      
+      // 检测是否为 iOS Safari（html2canvas 在 iOS 上更可靠）
+      if (_isIOSSafari()) {
+        debugPrint('Using html2canvas for iOS Safari');
+        imageBytes = await ScreenshotService.captureFlutterCanvas();
+      } else {
+        // 桌面端使用 Flutter 原生方法
+        debugPrint('Using Flutter RepaintBoundary for desktop');
+        imageBytes = await _captureWidgetToImage();
+      }
       
       if (imageBytes != null) {
         final String fileName = '总览_${DateTime.now().millisecondsSinceEpoch}.png';
@@ -411,6 +422,23 @@ class _OverviewScreenState extends State<OverviewScreen> {
           SnackBar(content: Text('下载失败: $e')),
         );
       }
+    }
+  }
+  
+  /// 检测是否为 iOS Safari
+  bool _isIOSSafari() {
+    try {
+      final userAgent = js.context['navigator']['userAgent'].toString().toLowerCase();
+      final vendor = js.context['navigator']['vendor']?.toString().toLowerCase() ?? '';
+      
+      // 检测 iOS 设备（iPhone 或 iPad）
+      final isIOS = userAgent.contains('iphone') || userAgent.contains('ipad') || userAgent.contains('ipod');
+      // 检测 Safari（不是 Chrome 或其他浏览器）
+      final isSafari = vendor.contains('apple') && !userAgent.contains('crios') && !userAgent.contains('fxios');
+      
+      return isIOS || isSafari;
+    } catch (e) {
+      return false;
     }
   }
   
