@@ -382,46 +382,38 @@ class _OverviewScreenState extends State<OverviewScreen> {
       // 显示加载提示
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('正在生成 Excel...'), duration: Duration(seconds: 2)),
+          const SnackBar(content: Text('正在生成截图...'), duration: Duration(seconds: 2)),
         );
       }
       
       // 延迟一小段时间确保 Widget 已经渲染
       await Future.delayed(const Duration(milliseconds: 300));
       
-      // Web 平台导出 Excel（最可靠的方案）
-      if (kIsWeb) {
-        debugPrint('Exporting to Excel for Web');
-        final excelSuccess = await _exportToExcel();
+      // 使用 Flutter 原生的 RepaintBoundary.toImage() 方法截图
+      // 这个方法在 Web 平台也支持，比 JavaScript 方案更可靠
+      debugPrint('Using Flutter RepaintBoundary for screenshot');
+      final imageBytes = await _captureWidgetToImage();
+      
+      if (imageBytes != null) {
+        final String fileName = '总览_${DateTime.now().millisecondsSinceEpoch}.png';
         
-        if (excelSuccess && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Excel 已下载')),
-          );
-        } else if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('导出失败，请重试')),
-          );
-        }
-      } else {
-        // 移动端原生应用使用 Flutter 原生方法
-        debugPrint('Using Flutter RepaintBoundary for native app');
-        final imageBytes = await _captureWidgetToImage();
-        
-        if (imageBytes != null) {
-          final String fileName = '总览_${DateTime.now().millisecondsSinceEpoch}.png';
+        if (kIsWeb) {
+          // Web 平台下载
           await WebDownloadService.downloadBytes(imageBytes, fileName);
-          
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('图片已下载')),
-            );
-          }
-        } else if (mounted) {
+        } else {
+          // 移动端原生应用下载
+          await WebDownloadService.downloadBytes(imageBytes, fileName);
+        }
+        
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('截图失败，请重试')),
+            const SnackBar(content: Text('截图已下载')),
           );
         }
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('截图失败，请重试')),
+        );
       }
     } catch (e) {
       debugPrint('Download error: $e');
