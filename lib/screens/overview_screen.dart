@@ -375,6 +375,16 @@ class _OverviewScreenState extends State<OverviewScreen> {
   /// 下载总览页面为图片
   Future<void> _downloadOverviewImage() async {
     try {
+      // 显示加载提示
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('正在生成图片...'), duration: Duration(seconds: 1)),
+        );
+      }
+      
+      // 延迟一小段时间确保 Widget 已经渲染
+      await Future.delayed(const Duration(milliseconds: 100));
+      
       // 使用 RepaintBoundary 捕获 Widget 为图片
       final Uint8List? imageBytes = await _captureWidgetToImage();
       
@@ -395,6 +405,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
         }
       }
     } catch (e) {
+      debugPrint('Download error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('下载失败: $e')),
@@ -411,9 +422,17 @@ class _OverviewScreenState extends State<OverviewScreen> {
           _screenshotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       
       if (boundary == null) {
-        debugPrint('RenderRepaintBoundary not found');
+        debugPrint('RenderRepaintBoundary not found - key: $_screenshotKey, context: ${_screenshotKey.currentContext}');
         return null;
       }
+      
+      // 确保渲染完成
+      if (!boundary.hasSize || boundary.size.isEmpty) {
+        debugPrint('Boundary has no size or is empty');
+        return null;
+      }
+      
+      debugPrint('Capturing image with size: ${boundary.size}');
       
       // 捕获为图片
       final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
@@ -426,9 +445,11 @@ class _OverviewScreenState extends State<OverviewScreen> {
         return null;
       }
       
+      debugPrint('Image captured successfully, size: ${byteData.lengthInBytes} bytes');
       return byteData.buffer.asUint8List();
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('Error capturing widget: $e');
+      debugPrint('Stack trace: $stackTrace');
       return null;
     }
   }
@@ -488,14 +509,10 @@ class _OverviewScreenState extends State<OverviewScreen> {
               .where((c) => seen.add(c.name))
               .toList();
 
-
-
-          return RepaintBoundary(
-            key: _screenshotKey,
-            child: Column(
-              children: [
-                // 分页选择器
-                Container(
+          return Column(
+            children: [
+              // 分页选择器（不在截图范围内）
+              Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: Column(
@@ -548,112 +565,121 @@ class _OverviewScreenState extends State<OverviewScreen> {
                   ],
                 ),
               ),
-              // 节次标题行（显示当前上课节次）
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                color: Colors.grey.shade100,
-                child: Row(
-                  children: [
-                    const SizedBox(width: 52),
-                    ...List.generate(12, (i) {
-                      final period = i + 1;
-                      final isCurrentPeriod = period == ExcelParserService.getCurrentPeriod(now);
-                      return Expanded(
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                            decoration: isCurrentPeriod
-                                ? BoxDecoration(
-                                    color: _currentPeriodColor,
-                                    borderRadius: BorderRadius.circular(4),
-                                  )
-                                : null,
-                            child: Text(
-                              '$period',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: isCurrentPeriod ? FontWeight.bold : FontWeight.normal,
-                                color: isCurrentPeriod ? Colors.white : Colors.grey.shade700,
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    }),
-                  ],
-                ),
-              ),
-              // 当前分页的教室列表
+              // 截图区域：包含节次标题和教室列表
               Expanded(
-                child: ListView.builder(
-                  itemCount: currentPageClassrooms.length,
-                  itemBuilder: (context, index) {
-                    final classroom = currentPageClassrooms[index];
-                    final classroomNumber = classroom.name.replaceAll(RegExp(r'[^0-9]'), '');
-
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(color: Colors.grey.shade200),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => CourseDisplayScreen(classroom: classroom),
+                child: RepaintBoundary(
+                  key: _screenshotKey,
+                  child: Column(
+                    children: [
+                      // 节次标题行（显示当前上课节次）
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        color: Colors.grey.shade100,
+                        child: Row(
+                          children: [
+                            const SizedBox(width: 52),
+                            ...List.generate(12, (i) {
+                              final period = i + 1;
+                              final isCurrentPeriod = period == ExcelParserService.getCurrentPeriod(now);
+                              return Expanded(
+                                child: Center(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                    decoration: isCurrentPeriod
+                                        ? BoxDecoration(
+                                            color: _currentPeriodColor,
+                                            borderRadius: BorderRadius.circular(4),
+                                          )
+                                        : null,
+                                    child: Text(
+                                      '$period',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: isCurrentPeriod ? FontWeight.bold : FontWeight.normal,
+                                        color: isCurrentPeriod ? Colors.white : Colors.grey.shade700,
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               );
-                            },
-                            child: SizedBox(
-                              width: 52,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
+                            }),
+                          ],
+                        ),
+                      ),
+                      // 当前分页的教室列表
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: currentPageClassrooms.length,
+                          itemBuilder: (context, index) {
+                            final classroom = currentPageClassrooms[index];
+                            final classroomNumber = classroom.name.replaceAll(RegExp(r'[^0-9]'), '');
+
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                border: Border(
+                                  bottom: BorderSide(color: Colors.grey.shade200),
+                                ),
+                              ),
+                              child: Row(
                                 children: [
-                                  Text(
-                                    classroomNumber,
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.bold,
-                                      color: Theme.of(context).colorScheme.primary,
-                                      decoration: TextDecoration.underline,
-                                      decorationColor: Theme.of(context).colorScheme.primary,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                  if (classroom.capacity != null)
-                                    Text(
-                                      '${classroom.capacity}',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.grey.shade500,
+                                  GestureDetector(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => CourseDisplayScreen(classroom: classroom),
+                                        ),
+                                      );
+                                    },
+                                    child: SizedBox(
+                                      width: 52,
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            classroomNumber,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                              color: Theme.of(context).colorScheme.primary,
+                                              decoration: TextDecoration.underline,
+                                              decorationColor: Theme.of(context).colorScheme.primary,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                          if (classroom.capacity != null)
+                                            Text(
+                                              '${classroom.capacity}',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.grey.shade500,
+                                              ),
+                                              textAlign: TextAlign.center,
+                                            ),
+                                        ],
                                       ),
-                                      textAlign: TextAlign.center,
                                     ),
+                                  ),
+                                  ..._buildPeriodCells(
+                                    context,
+                                    classroom,
+                                    weekday,
+                                    now,
+                                    absentMap,
+                                    provider,
+                                  ),
                                 ],
                               ),
-                            ),
-                          ),
-                          ..._buildPeriodCells(
-                            context,
-                            classroom,
-                            weekday,
-                            now,
-                            absentMap,
-                            provider,
-                          ),
-                        ],
+                            );
+                          },
+                        ),
                       ),
-                    );
-                  },
+                    ],
+                  ),
                 ),
               ),
             ],
-            ),
           );
         },
       ),
