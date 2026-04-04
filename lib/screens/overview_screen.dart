@@ -11,6 +11,7 @@ import '../services/excel_parser_service.dart';
 import '../services/web_download_service.dart';
 import '../services/screenshot_service.dart';
 import '../services/canvas_screenshot_service.dart';
+import '../services/overview_excel_service.dart' as excel_service;
 import 'course_display_screen.dart';
 import 'dart:js' as js;
 
@@ -375,42 +376,48 @@ class _OverviewScreenState extends State<OverviewScreen> {
     return false;
   }
 
-  /// 下载总览页面为图片
+  /// 下载总览页面为 Excel 文件（最可靠的跨平台方案）
   Future<void> _downloadOverviewImage() async {
     try {
       // 显示加载提示
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('正在生成图片...'), duration: Duration(seconds: 2)),
+          const SnackBar(content: Text('正在生成 Excel...'), duration: Duration(seconds: 2)),
         );
       }
       
       // 延迟一小段时间确保 Widget 已经渲染
       await Future.delayed(const Duration(milliseconds: 300));
       
-      Uint8List? imageBytes;
-      
-      // Web 平台统一使用原生 Canvas API，兼容性最好
+      // Web 平台导出 Excel（最可靠的方案）
       if (kIsWeb) {
-        debugPrint('Using native Canvas API for Web');
-        imageBytes = await _captureWithCanvasAPI();
-      } else {
-        // 移动端原生应用使用 Flutter 原生方法
-        debugPrint('Using Flutter RepaintBoundary for native app');
-        imageBytes = await _captureWidgetToImage();
-      }
-      
-      if (imageBytes != null) {
-        final String fileName = '总览_${DateTime.now().millisecondsSinceEpoch}.png';
-        await WebDownloadService.downloadBytes(imageBytes, fileName);
+        debugPrint('Exporting to Excel for Web');
+        final excelSuccess = await _exportToExcel();
         
-        if (mounted) {
+        if (excelSuccess && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('图片已下载')),
+            const SnackBar(content: Text('Excel 已下载')),
+          );
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('导出失败，请重试')),
           );
         }
       } else {
-        if (mounted) {
+        // 移动端原生应用使用 Flutter 原生方法
+        debugPrint('Using Flutter RepaintBoundary for native app');
+        final imageBytes = await _captureWidgetToImage();
+        
+        if (imageBytes != null) {
+          final String fileName = '总览_${DateTime.now().millisecondsSinceEpoch}.png';
+          await WebDownloadService.downloadBytes(imageBytes, fileName);
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('图片已下载')),
+            );
+          }
+        } else if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('截图失败，请重试')),
           );
@@ -426,32 +433,15 @@ class _OverviewScreenState extends State<OverviewScreen> {
     }
   }
   
-  /// 检测是否为 iOS Safari
-  bool _isIOSSafari() {
-    try {
-      final userAgent = js.context['navigator']['userAgent'].toString().toLowerCase();
-      final vendor = js.context['navigator']['vendor']?.toString().toLowerCase() ?? '';
-      
-      // 检测 iOS 设备（iPhone 或 iPad）
-      final isIOS = userAgent.contains('iphone') || userAgent.contains('ipad') || userAgent.contains('ipod');
-      // 检测 Safari（不是 Chrome 或其他浏览器）
-      final isSafari = vendor.contains('apple') && !userAgent.contains('crios') && !userAgent.contains('fxios');
-      
-      return isIOS || isSafari;
-    } catch (e) {
-      return false;
-    }
-  }
-  
-  /// 使用原生 Canvas API 捕获表格（iOS 兼容方案）
-  Future<Uint8List?> _captureWithCanvasAPI() async {
+  /// 导出为 Excel 文件（截图失败时的备选方案）
+  Future<bool> _exportToExcel() async {
     try {
       final provider = context.read<AppProvider>();
       final allClassrooms = provider.classrooms;
       
       if (allClassrooms.isEmpty) {
-        debugPrint('No classrooms to capture');
-        return null;
+        debugPrint('No classrooms to export');
+        return false;
       }
       
       // 获取当前选中的分页教室
@@ -472,7 +462,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
       
       if (classrooms.isEmpty) {
         debugPrint('No classrooms in selected pages');
-        return null;
+        return false;
       }
       
       // 构建表头
@@ -480,9 +470,10 @@ class _OverviewScreenState extends State<OverviewScreen> {
       
       // 构建数据行和颜色
       final rows = <List<String>>[];
-      final rowColors = <ColorInfo>[];
+      final rowColors = <excel_service.ColorInfo>[];
       final now = DateTime.now();
       final weekday = now.weekday;
+      
       for (int i = 0; i < classrooms.length; i++) {
         final classroom = classrooms[i];
         final row = <String>[classroom.name];
@@ -505,24 +496,43 @@ class _OverviewScreenState extends State<OverviewScreen> {
         
         // 添加颜色信息
         if (rowBgColor != null) {
-          rowColors.add(ColorInfo(
+          rowColors.add(excel_service.ColorInfo(
             index: i,
             bgColor: rowBgColor,
-            textColor: '#FFFFFF',
           ));
         }
       }
       
-      debugPrint('Capturing ${classrooms.length} classrooms with Canvas API');
-      return await CanvasScreenshotService.captureTable(
+      debugPrint('Exporting ${classrooms.length} classrooms to Excel');
+      final String fileName = '总览_${DateTime.now().millisecondsSinceEpoch}';
+      
+      return await excel_service.OverviewExcelService.exportToExcel(
         headers: headers,
         rows: rows,
         rowColors: rowColors,
+        fileName: fileName,
       );
     } catch (e, stackTrace) {
-      debugPrint('Canvas API capture error: $e');
+      debugPrint('Excel export error: $e');
       debugPrint(stackTrace.toString());
-      return null;
+      return false;
+    }
+  }
+  
+  /// 检测是否为 iOS Safari
+  bool _isIOSSafari() {
+    try {
+      final userAgent = js.context['navigator']['userAgent'].toString().toLowerCase();
+      final vendor = js.context['navigator']['vendor']?.toString().toLowerCase() ?? '';
+      
+      // 检测 iOS 设备（iPhone 或 iPad）
+      final isIOS = userAgent.contains('iphone') || userAgent.contains('ipad') || userAgent.contains('ipod');
+      // 检测 Safari（不是 Chrome 或其他浏览器）
+      final isSafari = vendor.contains('apple') && !userAgent.contains('crios') && !userAgent.contains('fxios');
+      
+      return isIOS || isSafari;
+    } catch (e) {
+      return false;
     }
   }
   
