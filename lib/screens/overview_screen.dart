@@ -392,7 +392,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
       // 检测是否为 iOS Safari（html2canvas 在 iOS 上更可靠）
       if (_isIOSSafari()) {
         debugPrint('Using html2canvas for iOS Safari');
-        imageBytes = await ScreenshotService.captureFlutterCanvas();
+        imageBytes = await ScreenshotService.capturePage();
       } else {
         // 桌面端使用 Flutter 原生方法
         debugPrint('Using Flutter RepaintBoundary for desktop');
