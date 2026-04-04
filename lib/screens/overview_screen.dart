@@ -390,13 +390,13 @@ class _OverviewScreenState extends State<OverviewScreen> {
       
       Uint8List? imageBytes;
       
-      // 检测是否为 iOS Safari（使用原生 Canvas API，兼容性最好）
-      if (_isIOSSafari()) {
-        debugPrint('Using native Canvas API for iOS');
+      // Web 平台统一使用原生 Canvas API，兼容性最好
+      if (kIsWeb) {
+        debugPrint('Using native Canvas API for Web');
         imageBytes = await _captureWithCanvasAPI();
       } else {
-        // 桌面端使用 Flutter 原生方法
-        debugPrint('Using Flutter RepaintBoundary for desktop');
+        // 移动端原生应用使用 Flutter 原生方法
+        debugPrint('Using Flutter RepaintBoundary for native app');
         imageBytes = await _captureWidgetToImage();
       }
       
