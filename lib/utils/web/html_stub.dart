@@ -29,8 +29,15 @@ class HtmlDocument {
 }
 
 class _Body {
+  final List<dynamic> children = [];
   void append(dynamic element) {}
   void removeChild(dynamic element) {}
 }
 
+// 模拟 dart:html 的 document 全局对象
+class _Document {
+  _Body get body => _Body();
+}
+
 final html = HtmlDocument();
+final document = _Document();
