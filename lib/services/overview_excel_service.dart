@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
-import 'dart:js' as js;
+
+// 条件导入：仅在 Web 平台导入 dart:js
+import '../utils/conditional_import.dart';
 
 /// 总览页面 Excel 导出服务 - 使用 SheetJS 生成真正的 Excel 文件
 class OverviewExcelService {

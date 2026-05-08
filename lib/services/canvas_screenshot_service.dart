@@ -1,7 +1,9 @@
 import 'dart:async';
-import 'dart:js' as js;
 import 'dart:typed_data';
 import 'dart:convert';
+
+// 条件导入：仅在 Web 平台导入 dart:js
+import '../utils/conditional_import.dart';
 
 /// 使用原生 Canvas API 截图服务 - 不依赖 html2canvas，iOS 兼容性好
 class CanvasScreenshotService {
