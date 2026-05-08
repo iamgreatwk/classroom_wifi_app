@@ -1,9 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/course_with_week.dart';
 import '../providers/app_provider.dart';
 import '../services/web_download_service.dart';
@@ -1412,8 +1415,10 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
         return;
       }
 
-      // 保存或分享图片
-      await _saveImageToGallery(imageBytes, '学期总览_第${_selectedWeekday == 0 ? "周日" : "周$_selectedWeekday"}.png');
+      // 显示预览对话框
+      if (mounted) {
+        _showMobileScreenshotPreview(imageBytes);
+      }
     } catch (e) {
       debugPrint('RepaintBoundary capture error: $e');
       if (mounted) {
@@ -1422,6 +1427,137 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
         );
       }
     }
+  }
+
+  /// 显示移动端截图预览对话框
+  void _showMobileScreenshotPreview(Uint8List imageBytes) {
+    final currentWeekday = _weekdays[_selectedWeekday];
+    final provider = context.read<AppProvider>();
+    final currentWeek = _getDisplayWeek(provider.selectedWeek, _selectedWeekday);
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 标题栏
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(26),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.image, color: Colors.grey),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '学期总览 - $currentWeekday 第$currentWeek周',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  // 分享按钮
+                  IconButton(
+                    icon: const Icon(Icons.share),
+                    tooltip: '分享图片',
+                    onPressed: () => _shareImageBytes(
+                      imageBytes,
+                      '学期总览_${currentWeekday}_第${currentWeek}周.png',
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+            ),
+            // 图片区域
+            Flexible(
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.65,
+                ),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                ),
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 4.0,
+                  child: Image.memory(
+                    imageBytes,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+            ),
+            // 底部提示
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(26),
+                    blurRadius: 4,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.touch_app,
+                        size: 20,
+                        color: Colors.grey.shade600,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '长按图片保存或截图分享',
+                        style: TextStyle(
+                          color: Colors.grey.shade700,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '提示：双指可缩放图片',
+                    style: TextStyle(
+                      color: Colors.grey.shade500,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 使用 RepaintBoundary 捕获 Widget 为 PNG 图片
@@ -1463,6 +1599,27 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('图片已生成 (${(imageBytes.length / 1024).toStringAsFixed(1)} KB)，请使用系统分享保存')),
       );
+    }
+  }
+
+  /// 分享图片字节数据
+  Future<void> _shareImageBytes(Uint8List bytes, String filename) async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/$filename');
+      await file.writeAsBytes(bytes);
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: filename,
+      );
+    } catch (e) {
+      debugPrint('Share error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('分享失败: $e')),
+        );
+      }
     }
   }
 

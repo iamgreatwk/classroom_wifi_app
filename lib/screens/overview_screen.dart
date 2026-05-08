@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/course.dart';
 import '../models/reminder.dart';
 import '../providers/app_provider.dart';
@@ -29,11 +32,221 @@ class OverviewScreen extends StatefulWidget {
 class _OverviewScreenState extends State<OverviewScreen> {
   /// 是否已经初始化默认分页
   bool _hasInitializedDefaultPage = false;
-  
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
+
   /// GlobalKey for capturing the overview widget
   final GlobalKey _screenshotKey = GlobalKey();
 
+  /// 课程类型筛选（本科/研究生/借用）
+  Set<String> _selectedCourseTypes = {'undergraduate', 'graduate', 'borrowed'};
 
+  /// 教室多选筛选
+  Set<String> _selectedClassrooms = {};
+
+  /// 是否展开筛选区域
+  bool _isFilterExpanded = true;
+
+  /// 当前显示的日期（默认为今天，但可以通过前一天/后一天切换）
+  DateTime _selectedDate = DateTime.now();
+
+  /// 是否显示搜索框
+  bool _showSearchBox = false;
+
+  /// 搜索控制器
+  final TextEditingController _searchController = TextEditingController();
+
+  /// 搜索焦点节点
+  final FocusNode _searchFocusNode = FocusNode();
+
+  /// 搜索结果列表
+  List<_SearchResult> _searchResults = [];
+
+
+
+  /// 切换到前一天
+  void _goToPreviousDay() {
+    setState(() {
+      _selectedDate = _selectedDate.subtract(const Duration(days: 1));
+      _searchResults = [];
+    });
+  }
+
+  /// 切换到后一天
+  void _goToNextDay() {
+    setState(() {
+      _selectedDate = _selectedDate.add(const Duration(days: 1));
+      _searchResults = [];
+    });
+  }
+
+  /// 执行搜索
+  void _performSearch(String query) {
+    if (query.isEmpty) {
+      setState(() {
+        _searchResults = [];
+      });
+      return;
+    }
+
+    final results = <_SearchResult>[];
+    final lowerQuery = query.toLowerCase();
+    final provider = context.read<AppProvider>();
+    final weekday = ExcelParserService.getWeekdayName(_selectedDate);
+
+    // 遍历所有教室和节次进行搜索
+    for (final classroom in provider.classrooms) {
+      for (int period = 1; period <= 12; period++) {
+        final course = classroom.getCourseAtPeriod(weekday, period);
+        if (course != null) {
+          // 搜索课程名
+          if (course.name.toLowerCase().contains(lowerQuery)) {
+            results.add(_SearchResult(
+              classroom: classroom,
+              period: period,
+              course: course,
+              matchType: 'course',
+            ));
+          }
+          // 搜索老师名
+          else if (course.teacher != null && course.teacher!.toLowerCase().contains(lowerQuery)) {
+            results.add(_SearchResult(
+              classroom: classroom,
+              period: period,
+              course: course,
+              matchType: 'teacher',
+            ));
+          }
+        }
+      }
+    }
+
+    setState(() {
+      _searchResults = results;
+    });
+  }
+
+  /// 切换课程类型筛选
+  void _toggleCourseType(String type) {
+    setState(() {
+      if (_selectedCourseTypes.contains(type)) {
+        if (_selectedCourseTypes.length > 1) {
+          _selectedCourseTypes.remove(type);
+        }
+      } else {
+        _selectedCourseTypes.add(type);
+      }
+    });
+  }
+
+  /// 判断课程是否匹配当前筛选条件
+  bool _matchesCourseTypeFilter(Course course) {
+    if (_selectedCourseTypes.isEmpty) return true;
+
+    final rawText = course.rawText ?? course.name;
+    final isGraduate = rawText.startsWith('(研)') || rawText.startsWith('◇');
+    final isBorrowed = rawText.startsWith('借用');
+    final isUndergraduate = !isBorrowed && !isGraduate;
+
+    if (_selectedCourseTypes.contains('graduate') && isGraduate) return true;
+    if (_selectedCourseTypes.contains('undergraduate') && isUndergraduate) return true;
+    if (_selectedCourseTypes.contains('borrowed') && isBorrowed) return true;
+
+    return false;
+  }
+
+  /// 显示教室筛选对话框
+  void _showClassroomFilterDialog(List<Classroom> allClassrooms) {
+    final tempSelected = Set<String>.from(_selectedClassrooms);
+    if (tempSelected.isEmpty) {
+      for (final c in allClassrooms) {
+        tempSelected.add(c.name);
+      }
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final sortedClassrooms = _getSortedClassrooms(allClassrooms);
+
+            return AlertDialog(
+              title: Row(
+                children: [
+                  const Text('筛选教室'),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () {
+                      setDialogState(() {
+                        tempSelected.clear();
+                        for (final c in sortedClassrooms) {
+                          tempSelected.add(c.name);
+                        }
+                      });
+                    },
+                    child: const Text('全选'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      setDialogState(() {
+                        tempSelected.clear();
+                      });
+                    },
+                    child: const Text('清空'),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 400,
+                child: ListView.builder(
+                  itemCount: sortedClassrooms.length,
+                  itemBuilder: (context, index) {
+                    final classroom = sortedClassrooms[index];
+                    return CheckboxListTile(
+                      title: Text(classroom.name),
+                      value: tempSelected.contains(classroom.name),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          if (value == true) {
+                            tempSelected.add(classroom.name);
+                          } else {
+                            tempSelected.remove(classroom.name);
+                          }
+                        });
+                      },
+                      dense: true,
+                    );
+                  },
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    setState(() {
+                      _selectedClassrooms = tempSelected;
+                    });
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('确定'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 
   /// 获取按数字排序后的教室列表
   List<Classroom> _getSortedClassrooms(List<Classroom> classrooms) {
@@ -529,8 +742,136 @@ class _OverviewScreenState extends State<OverviewScreen> {
       return;
     }
 
-    // 保存到相册或分享
-    await _saveImageToGallery(imageBytes);
+    // 显示预览对话框
+    if (mounted) {
+      _showMobileScreenshotPreview(imageBytes);
+    }
+  }
+
+  /// 显示移动端截图预览对话框
+  void _showMobileScreenshotPreview(Uint8List imageBytes) {
+    final weekday = ExcelParserService.getWeekdayName(DateTime.now());
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 标题栏
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(26),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.image, color: Colors.grey),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '今日总览 - $weekday',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  // 分享按钮
+                  IconButton(
+                    icon: const Icon(Icons.share),
+                    tooltip: '分享图片',
+                    onPressed: () => _shareImageBytes(imageBytes, '今日总览_$weekday.png'),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+            ),
+            // 图片区域
+            Flexible(
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.65,
+                ),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                ),
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 4.0,
+                  child: Image.memory(
+                    imageBytes,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+            ),
+            // 底部提示
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(26),
+                    blurRadius: 4,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.touch_app,
+                        size: 20,
+                        color: Colors.grey.shade600,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '长按图片保存或截图分享',
+                        style: TextStyle(
+                          color: Colors.grey.shade700,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '提示：双指可缩放图片',
+                    style: TextStyle(
+                      color: Colors.grey.shade500,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 保存图片到相册（iOS/Android）
@@ -556,12 +897,24 @@ class _OverviewScreenState extends State<OverviewScreen> {
 
   /// 分享图片字节数据
   Future<void> _shareImageBytes(Uint8List bytes, String filename) async {
-    // 使用 share_plus 或保存到临时文件后分享
-    // 这里简化处理，实际项目中应使用 share_plus 插件
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('图片已生成 (${bytes.length} bytes)，请使用系统分享')),
+    // 使用 share_plus 分享图片
+    try {
+      // 导入 share_plus 包进行分享
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/$filename');
+      await file.writeAsBytes(bytes);
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: filename,
       );
+    } catch (e) {
+      debugPrint('Share error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('分享失败: $e')),
+        );
+      }
     }
   }
   
@@ -855,7 +1208,42 @@ class _OverviewScreenState extends State<OverviewScreen> {
       appBar: AppBar(
         title: const Text('今日总览'),
         backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+        leading: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 前一天按钮
+            IconButton(
+              icon: const Icon(Icons.chevron_left),
+              tooltip: '前一天',
+              onPressed: _goToPreviousDay,
+            ),
+          ],
+        ),
         actions: [
+          // 后一天按钮
+          IconButton(
+            icon: const Icon(Icons.chevron_right),
+            tooltip: '后一天',
+            onPressed: _goToNextDay,
+          ),
+          // 搜索按钮
+          IconButton(
+            icon: Icon(_showSearchBox ? Icons.close : Icons.search),
+            tooltip: '搜索课程/老师',
+            onPressed: () {
+              setState(() {
+                _showSearchBox = !_showSearchBox;
+                if (!_showSearchBox) {
+                  _searchController.clear();
+                  _searchResults = [];
+                } else {
+                  Future.delayed(const Duration(milliseconds: 100), () {
+                    _searchFocusNode.requestFocus();
+                  });
+                }
+              });
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.download),
             tooltip: '下载为图片',
@@ -865,7 +1253,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
       ),
       body: Consumer<AppProvider>(
         builder: (context, provider, _) {
-          final now = DateTime.now();
+          final now = _selectedDate;
           final weekday = ExcelParserService.getWeekdayName(now);
           final allPeriods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
           final absentMap = provider.absentClassrooms;
@@ -900,12 +1288,97 @@ class _OverviewScreenState extends State<OverviewScreen> {
           }
           // 去重并按编号排序
           final seen = <String>{};
-          final currentPageClassrooms = allSelectedClassrooms
+          var currentPageClassrooms = allSelectedClassrooms
               .where((c) => seen.add(c.name))
               .toList();
 
+          // 应用教室筛选
+          if (_selectedClassrooms.isNotEmpty) {
+            currentPageClassrooms = currentPageClassrooms
+                .where((c) => _selectedClassrooms.contains(c.name))
+                .toList();
+          }
+
           return Column(
             children: [
+              // 搜索框
+              if (_showSearchBox)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: TextField(
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    decoration: InputDecoration(
+                      hintText: '搜索课程或老师...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() {
+                                  _searchResults = [];
+                                });
+                              },
+                            )
+                          : null,
+                      border: const OutlineInputBorder(),
+                      filled: true,
+                      fillColor: Colors.white,
+                    ),
+                    onChanged: (value) {
+                      _performSearch(value);
+                    },
+                  ),
+                ),
+
+              // 搜索结果
+              if (_searchResults.isNotEmpty)
+                Container(
+                  height: 200,
+                  color: Colors.yellow.shade50,
+                  child: ListView.builder(
+                    itemCount: _searchResults.length,
+                    itemBuilder: (context, index) {
+                      final result = _searchResults[index];
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(
+                          result.matchType == 'teacher'
+                              ? Icons.person
+                              : Icons.book,
+                          color: result.matchType == 'teacher'
+                              ? Colors.blue
+                              : Colors.green,
+                        ),
+                        title: Text(
+                          '${result.classroom.name} - ${result.course.name}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          '第${result.period}节 | ${result.course.teacher ?? "无老师"}',
+                        ),
+                        onTap: () {
+                          // 关闭搜索框并清空结果
+                          setState(() {
+                            _showSearchBox = false;
+                            _searchController.clear();
+                            _searchResults = [];
+                          });
+                          // 跳转到课程详情页面
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => CourseDisplayScreen(classroom: result.classroom),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+
               // 分页选择器（不在截图范围内）
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -917,7 +1390,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          weekday,
+                          '$weekday (${_selectedDate.month}/${_selectedDate.day})',
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(width: 8),
@@ -934,29 +1407,127 @@ class _OverviewScreenState extends State<OverviewScreen> {
                     ),
                     const SizedBox(height: 8),
                     // 分页标签（多选）
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      alignment: WrapAlignment.center,
+                      children: pages.asMap().entries.map((entry) {
+                        final pageName = entry.value.key;
+                        final isSelected = provider.isOverviewPageSelected(pageName);
+
+                        return FilterChip(
+                          label: Text(pageName, style: const TextStyle(fontSize: 11)),
+                          selected: isSelected,
+                          onSelected: (_) {
+                            provider.toggleOverviewPage(pageName);
+                          },
+                          selectedColor: Theme.of(context).colorScheme.primaryContainer,
+                          backgroundColor: Colors.grey.shade200,
+                          checkmarkColor: Theme.of(context).colorScheme.primary,
+                          padding: EdgeInsets.zero,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 8),
+                    // 筛选栏标题 + 展开/收起按钮
+                    InkWell(
+                      onTap: () => setState(() => _isFilterExpanded = !_isFilterExpanded),
                       child: Row(
-                        children: pages.asMap().entries.map((entry) {
-                          final pageName = entry.value.key;
-                          final isSelected = provider.isOverviewPageSelected(pageName);
-                          
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: FilterChip(
-                              label: Text(pageName),
-                              selected: isSelected,
-                              onSelected: (_) {
-                                provider.toggleOverviewPage(pageName);
-                              },
-                              selectedColor: Theme.of(context).colorScheme.primaryContainer,
-                              backgroundColor: Colors.grey.shade200,
-                              checkmarkColor: Theme.of(context).colorScheme.primary,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _isFilterExpanded ? Icons.expand_less : Icons.expand_more,
+                            size: 20,
+                            color: Colors.grey.shade600,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _isFilterExpanded ? '收起筛选' : '展开筛选',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
                             ),
-                          );
-                        }).toList(),
+                          ),
+                          const SizedBox(width: 4),
+                          // 显示当前筛选状态摘要
+                          if (!_isFilterExpanded) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade100,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '${_selectedCourseTypes.length}种类型',
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.shade100,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                _selectedClassrooms.isEmpty ? '全部教室' : '${_selectedClassrooms.length}个教室',
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
+                    // 展开的筛选内容
+                    if (_isFilterExpanded) ...[
+                      const SizedBox(height: 8),
+                      // 课程类型筛选
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          FilterChip(
+                            label: const Text('研究生', style: TextStyle(fontSize: 11)),
+                            selected: _selectedCourseTypes.contains('graduate'),
+                            onSelected: (_) => _toggleCourseType('graduate'),
+                            selectedColor: Colors.blue.shade100,
+                            padding: EdgeInsets.zero,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          FilterChip(
+                            label: const Text('本科', style: TextStyle(fontSize: 11)),
+                            selected: _selectedCourseTypes.contains('undergraduate'),
+                            onSelected: (_) => _toggleCourseType('undergraduate'),
+                            selectedColor: Colors.green.shade100,
+                            padding: EdgeInsets.zero,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          FilterChip(
+                            label: const Text('借用', style: TextStyle(fontSize: 11)),
+                            selected: _selectedCourseTypes.contains('borrowed'),
+                            onSelected: (_) => _toggleCourseType('borrowed'),
+                            selectedColor: Colors.orange.shade100,
+                            padding: EdgeInsets.zero,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          ActionChip(
+                            label: Text(
+                              _selectedClassrooms.isEmpty
+                                  ? '教室'
+                                  : '教室(${_selectedClassrooms.length})',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            avatar: const Icon(Icons.meeting_room, size: 14),
+                            onPressed: () => _showClassroomFilterDialog(currentPageClassrooms),
+                            padding: EdgeInsets.zero,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1098,22 +1669,37 @@ class _LegendItem extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 14,
-          height: 14,
+          width: 12,
+          height: 12,
           decoration: BoxDecoration(
             color: color,
             borderRadius: BorderRadius.circular(2),
           ),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 2),
         Text(
           label,
           style: TextStyle(
-            fontSize: 12,
+            fontSize: 10,
             color: Colors.grey.shade700,
           ),
         ),
       ],
     );
   }
+}
+
+/// 搜索结果数据类
+class _SearchResult {
+  final Classroom classroom;
+  final int period;
+  final Course course;
+  final String matchType; // 'teacher' 或 'course'
+
+  _SearchResult({
+    required this.classroom,
+    required this.period,
+    required this.course,
+    required this.matchType,
+  });
 }
