@@ -9,12 +9,13 @@ class Url {
   static void revokeObjectUrl(String url) {}
 }
 
-class AnchorElement {
+// ignore: camel_case_types
+class _AnchorElementImpl {
   String? href;
   String? download;
   String style = '';
   
-  AnchorElement({this.href});
+  _AnchorElementImpl({this.href});
   
   void click() {}
   void remove() {}
@@ -22,6 +23,9 @@ class AnchorElement {
     if (name == 'download') download = value;
   }
 }
+
+// 对外暴露的类型别名
+typedef AnchorElement = _AnchorElementImpl;
 
 // ImageElement 类
 class ImageElement {
@@ -50,11 +54,11 @@ class _BlobFactory {
 
 // 模拟可调用类，返回 AnchorElement（支持命名参数）
 class _AnchorElementFactory {
-  AnchorElement call({String? href}) => AnchorElement(href: href);
+  _AnchorElementImpl call({String? href}) => _AnchorElementImpl(href: href);
 }
 
 class HtmlDocument {
-  AnchorElement createElement(String tag) => AnchorElement();
+  _AnchorElementImpl createElement(String tag) => _AnchorElementImpl();
   dynamic get body => _Body();
 
   // 工厂函数
