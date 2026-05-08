@@ -17,15 +17,23 @@ class AnchorElement {
   void remove() {}
 }
 
-// ImageElement 类 - 可通过 ImageElementCtor() 构造
+// ImageElement 类
 class ImageElement {
   String src = '';
-  String style = '';
+  final ImageElementStyle style = ImageElementStyle();
   bool draggable = false;
 }
 
-// 模拟构造函数 - 可被调用返回 ImageElement
-class ImageElementCtor {
+// ImageElement 的 style 属性
+class ImageElementStyle {
+  String width = '';
+  String height = '';
+  String objectFit = '';
+  String display = '';
+}
+
+// 模拟可调用类，返回 ImageElement
+class _ImageElementFactory {
   ImageElement call() => ImageElement();
 }
 
@@ -33,8 +41,8 @@ class HtmlDocument {
   AnchorElement createElement(String tag) => AnchorElement();
   dynamic get body => _Body();
 
-  // ImageElement 作为可调用对象
-  final ImageElementCtor ImageElement = ImageElementCtor();
+  // 工厂函数
+  final _ImageElementFactory ImageElement = _ImageElementFactory();
 }
 
 class _Body {
