@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
@@ -171,9 +172,34 @@ class ReminderScreen extends StatelessWidget {
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.single;
 
-        if (file.bytes != null) {
-          // 使用 Stream 来传递进度，支持对话框内实时更新
-          final progressController = StreamController<Map<String, dynamic>>.broadcast();
+        if (kIsWeb && file.bytes != null) {
+          // Web环境：使用bytes
+          await _importSemesterExcelWithProgress(context, provider, file.bytes!);
+        } else if (!kIsWeb && file.path != null) {
+          // iOS/Android环境：使用path
+          await _importSemesterExcelWithProgress(context, provider, null, file.path!);
+        } else {
+          throw Exception('无法读取文件内容');
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导入失败: $e')),
+        );
+      }
+    }
+  }
+
+  /// 导入学期课表（带进度）- Web用bytes，iOS/Android用path
+  Future<void> _importSemesterExcelWithProgress(
+    BuildContext context,
+    AppProvider provider,
+    Uint8List? bytes,
+    [String? filePath]
+  ) async {
+    // 使用 Stream 来传递进度，支持对话框内实时更新
+    final progressController = StreamController<Map<String, dynamic>>.broadcast();
 
           // 显示进度对话框
           if (context.mounted) {
@@ -231,16 +257,30 @@ class ReminderScreen extends StatelessWidget {
           }
 
           try {
-            // 使用异步分批解析
-            await provider.parseSemesterExcelBytesAsync(
-              file.bytes!,
-              onProgress: (current, total, message) {
-                progressController.add({
-                  'progress': current / total,
-                  'message': message,
-                });
-              },
-            );
+            // 根据平台选择解析方法
+            if (bytes != null) {
+              // Web：使用bytes
+              await provider.parseSemesterExcelBytesAsync(
+                bytes,
+                onProgress: (current, total, message) {
+                  progressController.add({
+                    'progress': current / total,
+                    'message': message,
+                  });
+                },
+              );
+            } else if (filePath != null) {
+              // iOS/Android：使用filePath
+              await provider.parseSemesterExcelFile(
+                filePath,
+                onProgress: (current, total, message) {
+                  progressController.add({
+                    'progress': current / total,
+                    'message': message,
+                  });
+                },
+              );
+            }
 
             await progressController.close();
 
@@ -259,17 +299,6 @@ class ReminderScreen extends StatelessWidget {
             }
             throw e;
           }
-        } else {
-          throw Exception('无法读取文件内容');
-        }
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('导入失败: $e')),
-        );
-      }
-    }
   }
 
   /// 选择学期课表 JSON 文件
@@ -283,60 +312,64 @@ class ReminderScreen extends StatelessWidget {
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.single;
 
-        if (file.bytes != null) {
-          // 显示进度对话框
-          if (context.mounted) {
-            showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (dialogContext) => const PopScope(
-                canPop: false,
-                child: AlertDialog(
-                  title: Row(
-                    children: [
-                      SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      SizedBox(width: 12),
-                      Text('正在导入 JSON...'),
-                    ],
-                  ),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('正在解析 JSON 数据...'),
-                      SizedBox(height: 16),
-                      LinearProgressIndicator(),
-                    ],
-                  ),
+        // 显示进度对话框
+        if (context.mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (dialogContext) => const PopScope(
+              canPop: false,
+              child: AlertDialog(
+                title: Row(
+                  children: [
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 12),
+                    Text('正在导入 JSON...'),
+                  ],
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('正在解析 JSON 数据...'),
+                    SizedBox(height: 16),
+                    LinearProgressIndicator(),
+                  ],
                 ),
               ),
+            ),
+          );
+        }
+
+        try {
+          // 根据平台选择解析方法
+          if (kIsWeb && file.bytes != null) {
+            // Web：使用bytes
+            await provider.parseSemesterJsonBytes(file.bytes!);
+          } else if (!kIsWeb && file.path != null) {
+            // iOS/Android：使用filePath
+            await provider.parseSemesterJsonFile(file.path!);
+          } else {
+            throw Exception('无法读取文件内容');
+          }
+
+          // 关闭进度对话框
+          if (context.mounted) {
+            Navigator.of(context).pop();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('学期课表 JSON 导入成功！')),
             );
           }
-
-          try {
-            // 使用 JSON 解析器
-            await provider.parseSemesterJsonBytes(file.bytes!);
-
-            // 关闭进度对话框
-            if (context.mounted) {
-              Navigator.of(context).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('学期课表 JSON 导入成功！')),
-              );
-            }
-          } catch (e) {
-            // 关闭进度对话框
-            if (context.mounted) {
-              Navigator.of(context).pop();
-            }
-            throw e;
+        } catch (e) {
+          // 关闭进度对话框
+          if (context.mounted) {
+            Navigator.of(context).pop();
           }
-        } else {
-          throw Exception('无法读取文件内容');
+          throw e;
         }
       }
     } catch (e) {

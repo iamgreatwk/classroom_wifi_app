@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../models/course.dart';
 import '../models/course_with_week.dart';
@@ -751,5 +752,20 @@ class AppProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  /// 从文件路径导入学期课表（iOS/Android使用）
+  Future<void> parseSemesterExcelFile(
+    String filePath, {
+    required void Function(int current, int total, String message) onProgress,
+  }) async {
+    final bytes = await File(filePath).readAsBytes();
+    return parseSemesterExcelBytesAsync(bytes, onProgress: onProgress);
+  }
+
+  /// 从文件路径导入学期课表 JSON（iOS/Android使用）
+  Future<void> parseSemesterJsonFile(String filePath) async {
+    final bytes = await File(filePath).readAsBytes();
+    return parseSemesterJsonBytes(bytes);
   }
 }
