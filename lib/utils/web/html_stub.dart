@@ -17,6 +17,12 @@ class AnchorElement {
   void remove() {}
 }
 
+class ImageElement {
+  String src = '';
+  String style = '';
+  bool draggable = false;
+}
+
 class HtmlDocument {
   AnchorElement createElement(String tag) => AnchorElement();
   dynamic get body => _Body();

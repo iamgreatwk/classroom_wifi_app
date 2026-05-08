@@ -12,6 +12,8 @@ import 'package:flutter/foundation.dart';
 
 // 条件导入：仅在 Web 平台导入 dart:js
 import '../utils/conditional_import.dart';
+// 条件导入：platformViewRegistry
+import '../utils/conditional_platform_view.dart' as platform_view;
 
 /// 学期总览页面 - 显示整学期课表，支持按周次筛选
 /// 采用表格布局，颜色区分不同课程
@@ -2595,6 +2597,8 @@ class _NativeImageViewState extends State<_NativeImageView> {
 
   void _registerView() {
     // 注册原生 HTML img 元素（仅 Web 平台）
+    if (!kIsWeb) return;
+
     final dataUrlEscaped = widget.dataUrl.replaceAll("'", "\\'");
     js.context.callMethod('eval', ['''
       (function() {
@@ -2605,8 +2609,8 @@ class _NativeImageViewState extends State<_NativeImageView> {
       })();
     ''']);
 
-    // ignore: undefined_prefixed_name
-    ui.platformViewRegistry.registerViewFactory(_viewId, (int viewId) {
+    // 使用条件导入的 registerViewFactory
+    platform_view.registerViewFactory(_viewId, (int viewId) {
       final img = html.ImageElement()
         ..src = widget.dataUrl
         ..style.width = '100%'
