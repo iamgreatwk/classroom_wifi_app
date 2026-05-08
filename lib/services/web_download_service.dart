@@ -1,6 +1,8 @@
-import 'dart:html' as html;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+
+// 条件导入：仅在 Web 平台导入 dart:html
+import '../utils/conditional_html.dart';
 
 /// Web 下载服务
 /// 用于在 Web 平台下载文件
