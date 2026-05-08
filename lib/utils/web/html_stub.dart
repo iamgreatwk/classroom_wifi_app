@@ -1,13 +1,19 @@
 // 非 Web 平台：提供 dart:html 的 stub 实现
 
-class Blob {
-  Blob(List<dynamic> data, [String? type]) {}
+// ignore: camel_case_types
+class _BlobImpl {
+  _BlobImpl(List<dynamic> data, [String? type]) {}
 }
 
-class Url {
+typedef Blob = _BlobImpl;
+
+// ignore: camel_case_types
+class _UrlImpl {
   static String createObjectUrlFromBlob(Blob blob) => '';
   static void revokeObjectUrl(String url) {}
 }
+
+typedef Url = _UrlImpl;
 
 // ignore: camel_case_types
 class _AnchorElementImpl {
@@ -27,12 +33,14 @@ class _AnchorElementImpl {
 // 对外暴露的类型别名
 typedef AnchorElement = _AnchorElementImpl;
 
-// ImageElement 类
-class ImageElement {
+// ignore: camel_case_types
+class _ImageElementImpl {
   String src = '';
   final ImageElementStyle style = ImageElementStyle();
   bool draggable = false;
 }
+
+typedef ImageElement = _ImageElementImpl;
 
 // ImageElement 的 style 属性
 class ImageElementStyle {
@@ -44,12 +52,12 @@ class ImageElementStyle {
 
 // 模拟可调用类，返回 ImageElement
 class _ImageElementFactory {
-  ImageElement call() => ImageElement();
+  _ImageElementImpl call() => _ImageElementImpl();
 }
 
 // 模拟可调用类，返回 Blob
 class _BlobFactory {
-  Blob call(List<dynamic> data, [String? type]) => Blob(data, type);
+  _BlobImpl call(List<dynamic> data, [String? type]) => _BlobImpl(data, type);
 }
 
 // 模拟可调用类，返回 AnchorElement（支持命名参数）
@@ -67,14 +75,14 @@ class HtmlDocument {
   final _AnchorElementFactory AnchorElement = _AnchorElementFactory();
 
   // 静态类成员
-  final UrlClass Url = UrlClass();
+  final _UrlClass Url = _UrlClass();
 
   // document 对象
   final _Document document = _Document();
 }
 
 // 模拟 dart:html 的 Url 类（作为实例成员）
-class UrlClass {
+class _UrlClass {
   String createObjectUrlFromBlob(Blob blob) => '';
   void revokeObjectUrl(String url) {}
 }
