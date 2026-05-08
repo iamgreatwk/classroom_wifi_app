@@ -2576,7 +2576,9 @@ class _NativeImageViewState extends State<_NativeImageView> {
   void initState() {
     super.initState();
     _viewId = 'native-img-${widget.dataUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
-    _registerView();
+    if (kIsWeb) {
+      _registerView();
+    }
   }
 
   @override
@@ -2585,12 +2587,14 @@ class _NativeImageViewState extends State<_NativeImageView> {
     if (oldWidget.dataUrl != widget.dataUrl) {
       // dataUrl 变化了，重新注册视图
       _viewId = 'native-img-${widget.dataUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
-      _registerView();
+      if (kIsWeb) {
+        _registerView();
+      }
     }
   }
 
   void _registerView() {
-    // 注册原生 HTML img 元素
+    // 注册原生 HTML img 元素（仅 Web 平台）
     final dataUrlEscaped = widget.dataUrl.replaceAll("'", "\\'");
     js.context.callMethod('eval', ['''
       (function() {
@@ -2616,6 +2620,13 @@ class _NativeImageViewState extends State<_NativeImageView> {
 
   @override
   Widget build(BuildContext context) {
+    if (!kIsWeb) {
+      // 非 Web 平台使用 Flutter Image
+      return Image.network(
+        widget.dataUrl,
+        fit: BoxFit.contain,
+      );
+    }
     return HtmlElementView(viewType: _viewId);
   }
 }
