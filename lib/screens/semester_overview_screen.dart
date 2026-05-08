@@ -1547,7 +1547,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
       // 执行 Canvas 绘制和下载（仅 Web 平台）
       if (!kIsWeb) return;
       
-      JSBridge.eval('''
+      js.context.callMethod('eval', ['''
         (function() {
           try {
             const headers = JSON.parse('$headersJson');
@@ -1708,20 +1708,20 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
       for (int i = 0; i < 30; i++) {
         await Future.delayed(const Duration(milliseconds: 100));
 
-        final error = JSBridge.getProperty('__screenshotError');
+        final error = js.context['__screenshotError'];
         if (error != null && error.toString().isNotEmpty) {
           debugPrint('Screenshot error: $error');
-          JSBridge.setProperty('__screenshotError', null);
-          JSBridge.setProperty('__screenshotResult', null);
+          js.context['__screenshotError'] = null;
+          js.context['__screenshotResult'] = null;
           return null;
         }
 
-        final result = JSBridge.getProperty('__screenshotResult');
+        final result = js.context['__screenshotResult'];
         if (result != null && result.toString().isNotEmpty) {
           final dataUrl = result.toString();
           debugPrint('Screenshot success, length: \${dataUrl.length}');
-          JSBridge.setProperty('__screenshotResult', null);
-          JSBridge.setProperty('__screenshotError', null);
+          js.context['__screenshotResult'] = null;
+          js.context['__screenshotError'] = null;
           return dataUrl;
         }
       }
@@ -2406,12 +2406,12 @@ class _SemesterScreenshotPreviewDialogState extends State<_SemesterScreenshotPre
         })();
       ''';
 
-      JSBridge.eval(script);
+      js.context.callMethod('eval', [script]);
 
       // 等待结果
       await Future.delayed(const Duration(milliseconds: 1000));
 
-      final result = JSBridge.getProperty('flutterShareResult') as String?;
+      final result = js.context['flutterShareResult'] as String?;
 
       if (mounted && result != null) {
         switch (result) {
@@ -2426,7 +2426,7 @@ class _SemesterScreenshotPreviewDialogState extends State<_SemesterScreenshotPre
             );
             break;
         }
-        JSBridge.setProperty('flutterShareResult', null);
+        js.context['flutterShareResult'] = null;
       }
     } catch (e) {
       debugPrint('Share error: $e');
