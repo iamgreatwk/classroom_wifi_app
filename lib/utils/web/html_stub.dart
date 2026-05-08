@@ -13,8 +13,14 @@ class AnchorElement {
   String? href;
   String? download;
   String style = '';
+  
+  AnchorElement({this.href});
+  
   void click() {}
   void remove() {}
+  void setAttribute(String name, String value) {
+    if (name == 'download') download = value;
+  }
 }
 
 // ImageElement 类
@@ -42,6 +48,11 @@ class _BlobFactory {
   Blob call(List<dynamic> data, [String? type]) => Blob(data, type);
 }
 
+// 模拟可调用类，返回 AnchorElement（支持命名参数）
+class _AnchorElementFactory {
+  AnchorElement call({String? href}) => AnchorElement(href: href);
+}
+
 class HtmlDocument {
   AnchorElement createElement(String tag) => AnchorElement();
   dynamic get body => _Body();
@@ -49,9 +60,13 @@ class HtmlDocument {
   // 工厂函数
   final _ImageElementFactory ImageElement = _ImageElementFactory();
   final _BlobFactory Blob = _BlobFactory();
+  final _AnchorElementFactory AnchorElement = _AnchorElementFactory();
 
   // 静态类成员
   final UrlClass Url = UrlClass();
+
+  // document 对象
+  final _Document document = _Document();
 }
 
 // 模拟 dart:html 的 Url 类（作为实例成员）
