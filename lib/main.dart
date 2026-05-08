@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'providers/app_provider.dart';
 import 'screens/reminder_screen.dart';
 import 'screens/overview_screen.dart';
+import 'screens/semester_overview_screen.dart';
 
 void main() {
   runApp(const ClassroomWifiApp());
@@ -120,6 +121,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     return Scaffold(
       body: [
         const OverviewScreen(),
+        const SemesterOverviewScreen(),
         const ReminderScreen(),
       ][_currentIndex],
       bottomNavigationBar: NavigationBar(
@@ -134,6 +136,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             icon: Icon(Icons.grid_view_outlined),
             selectedIcon: Icon(Icons.grid_view),
             label: '总览',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.calendar_month_outlined),
+            selectedIcon: Icon(Icons.calendar_month),
+            label: '学期',
           ),
           NavigationDestination(
             icon: Icon(Icons.visibility_outlined),

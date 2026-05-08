@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/course.dart';
+import '../models/course_with_week.dart';
 import '../models/reminder.dart';
 
 /// 设置存储服务
@@ -12,6 +13,7 @@ class StorageService {
   static const String _enabledFixedRemindersKey = 'enabled_fixed_reminders';
   static const String _customRemindersKey = 'custom_reminders';
   static const String _absentClassroomsKey = 'absent_classrooms';
+  static const String _semesterClassroomsKey = 'semester_classrooms_data';
 
   static final StorageService _instance = StorageService._internal();
   factory StorageService() => _instance;
@@ -180,5 +182,104 @@ class StorageService {
     } catch (e) {
       return {};
     }
+  }
+
+  /// 保存学期课表数据
+  Future<bool> saveSemesterClassrooms(List<SemesterClassroom> classrooms) async {
+    await init();
+    final jsonList = classrooms.map((c) => _semesterClassroomToJson(c)).toList();
+    return await _prefs!.setString(_semesterClassroomsKey, jsonEncode(jsonList));
+  }
+
+  /// 获取学期课表数据
+  Future<List<SemesterClassroom>> getSemesterClassrooms() async {
+    await init();
+    final jsonStr = _prefs!.getString(_semesterClassroomsKey);
+    if (jsonStr == null || jsonStr.isEmpty) return [];
+
+    try {
+      final jsonList = jsonDecode(jsonStr) as List;
+      return jsonList
+          .map((json) => _semesterClassroomFromJson(json as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// 清除学期课表数据
+  Future<bool> clearSemesterClassrooms() async {
+    await init();
+    return await _prefs!.remove(_semesterClassroomsKey);
+  }
+
+  /// 将 SemesterClassroom 转换为 JSON
+  Map<String, dynamic> _semesterClassroomToJson(SemesterClassroom classroom) {
+    final scheduleJson = <String, dynamic>{};
+    classroom.schedule.forEach((day, periods) {
+      final periodsJson = <String, dynamic>{};
+      periods.forEach((period, courses) {
+        periodsJson[period.toString()] = courses.map((c) => _courseWithWeekToJson(c)).toList();
+      });
+      scheduleJson[day] = periodsJson;
+    });
+
+    return {
+      'name': classroom.name,
+      'schedule': scheduleJson,
+      'capacity': classroom.capacity,
+    };
+  }
+
+  /// 从 JSON 创建 SemesterClassroom
+  SemesterClassroom _semesterClassroomFromJson(Map<String, dynamic> json) {
+    final schedule = <String, Map<int, List<CourseWithWeek>>>{};
+    final scheduleJson = json['schedule'] as Map<String, dynamic>;
+    
+    scheduleJson.forEach((day, periodsJson) {
+      final periods = <int, List<CourseWithWeek>>{};
+      (periodsJson as Map<String, dynamic>).forEach((period, coursesJson) {
+        periods[int.parse(period)] = (coursesJson as List)
+            .map((c) => _courseWithWeekFromJson(c as Map<String, dynamic>))
+            .toList();
+      });
+      schedule[day] = periods;
+    });
+
+    return SemesterClassroom(
+      name: json['name'] as String,
+      schedule: schedule,
+      capacity: json['capacity'] as int?,
+    );
+  }
+
+  /// 将 CourseWithWeek 转换为 JSON
+  Map<String, dynamic> _courseWithWeekToJson(CourseWithWeek course) {
+    return {
+      'name': course.name,
+      'teacher': course.teacher,
+      'weekday': course.weekday,
+      'period': course.period,
+      'startWeek': course.startWeek,
+      'endWeek': course.endWeek,
+      'rawText': course.rawText,
+      'classroom': course.classroom,
+      'studentCount': course.studentCount,
+    };
+  }
+
+  /// 从 JSON 创建 CourseWithWeek
+  CourseWithWeek _courseWithWeekFromJson(Map<String, dynamic> json) {
+    return CourseWithWeek(
+      name: json['name'] as String,
+      teacher: json['teacher'] as String?,
+      weekday: json['weekday'] as String,
+      period: json['period'] as int,
+      startWeek: json['startWeek'] as int,
+      endWeek: json['endWeek'] as int,
+      rawText: json['rawText'] as String?,
+      classroom: json['classroom'] as String,
+      studentCount: json['studentCount'] as int?,
+    );
   }
 }

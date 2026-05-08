@@ -14,13 +14,14 @@
     This is a placeholder for base href that will be replaced by the value of
     the `--base-href` argument provided to `flutter build`.
   -->
-  <base href="/classroom/">
+  <base href="/classroom_wifi_app/">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="A new Flutter project.">
 
   <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="classroom_wifi_app">
@@ -34,6 +35,9 @@
   
   <!-- SheetJS for Excel export (本地内嵌版本，避免 CDN 加载问题) -->
   <script src="xlsx.full.min.js"></script>
+  
+  <!-- html2canvas for DOM screenshot -->
+  <script src="html2canvas.min.js"></script>
   
   <!-- Screenshot helper function -->
   <script>

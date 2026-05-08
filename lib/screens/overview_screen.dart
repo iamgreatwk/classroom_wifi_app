@@ -12,7 +12,11 @@ import '../services/excel_parser_service.dart';
 import '../services/web_download_service.dart';
 import '../services/screenshot_service.dart';
 import 'course_display_screen.dart';
-import 'dart:js' as js;
+// Web 平台特定的导入
+import 'package:flutter/foundation.dart';
+
+// 条件导入：仅在 Web 平台导入 dart:js
+import '../utils/conditional_import.dart';
 
 /// 总览页面 - 显示所有教室1-12节详细情况
 class OverviewScreen extends StatefulWidget {
@@ -512,13 +516,19 @@ class _OverviewScreenState extends State<OverviewScreen> {
     }
   }
   
-  /// 使用 JavaScript Canvas 绘制并下载截图
+  /// 使用 JavaScript Canvas 绘制并下载截图（仅 Web 平台）
   Future<bool> _captureWithJS(
     List<String> headers,
     List<List<String>> rows,
     List<Map<String, dynamic>> rowColors,
     String weekday,
   ) async {
+    // 仅 Web 平台支持
+    if (!kIsWeb) {
+      debugPrint('_captureWithJS is only supported on Web platform');
+      return false;
+    }
+    
     try {
       final completer = Completer<bool>();
       

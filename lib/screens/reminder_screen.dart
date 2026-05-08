@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
@@ -43,6 +44,12 @@ class ReminderScreen extends StatelessWidget {
               _buildSectionHeader(context, '导入课表', Icons.table_chart),
               const SizedBox(height: 8),
               _buildImportCard(context, provider),
+              const SizedBox(height: 24),
+
+              // 导入学期课表部分
+              _buildSectionHeader(context, '学期课表', Icons.calendar_month),
+              const SizedBox(height: 8),
+              _buildSemesterImportCard(context, provider),
             ],
           );
         },
@@ -96,6 +103,278 @@ class ReminderScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 学期课表导入卡片
+  Widget _buildSemesterImportCard(BuildContext context, AppProvider provider) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              provider.hasSemesterData
+                  ? '已导入学期课表，共 ${provider.semesterClassrooms.length} 个教室'
+                  : '导入整学期课表，可查看每周每天的课程安排',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 12),
+            // 导入学期课表按钮（Excel）
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => _pickSemesterExcelFile(context, provider),
+                icon: const Icon(Icons.upload_file),
+                label: Text(provider.hasSemesterData ? '重新导入学期课表 (Excel)' : '导入学期课表 (Excel)'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // 导入学期课表按钮（JSON）
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _pickSemesterJsonFile(context, provider),
+                icon: const Icon(Icons.code),
+                label: const Text('导入学期课表 (JSON)'),
+              ),
+            ),
+            if (provider.hasSemesterData) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _clearSemesterData(context, provider),
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('清除学期课表'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 选择学期课表Excel文件（带进度对话框）
+  Future<void> _pickSemesterExcelFile(BuildContext context, AppProvider provider) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx', 'xls'],
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.single;
+
+        if (file.bytes != null) {
+          // 使用 Stream 来传递进度，支持对话框内实时更新
+          final progressController = StreamController<Map<String, dynamic>>.broadcast();
+
+          // 显示进度对话框
+          if (context.mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (dialogContext) => StreamBuilder<Map<String, dynamic>>(
+                stream: progressController.stream,
+                initialData: {'progress': 0.0, 'message': '准备导入...'},
+                builder: (context, snapshot) {
+                  final data = snapshot.data ?? {'progress': 0.0, 'message': '准备导入...'};
+                  final progress = (data['progress'] as num).toDouble();
+                  final message = data['message'] as String;
+
+                  return PopScope(
+                    canPop: false,
+                    child: AlertDialog(
+                      title: const Row(
+                        children: [
+                          SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: 12),
+                          Text('正在导入...'),
+                        ],
+                      ),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(message),
+                          const SizedBox(height: 16),
+                          LinearProgressIndicator(
+                            value: progress > 0 ? progress : null,
+                            minHeight: 8,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '${(progress * 100).toInt()}%',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          }
+
+          try {
+            // 使用异步分批解析
+            await provider.parseSemesterExcelBytesAsync(
+              file.bytes!,
+              onProgress: (current, total, message) {
+                progressController.add({
+                  'progress': current / total,
+                  'message': message,
+                });
+              },
+            );
+
+            await progressController.close();
+
+            // 关闭进度对话框
+            if (context.mounted) {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('学期课表导入成功！')),
+              );
+            }
+          } catch (e) {
+            await progressController.close();
+            // 关闭进度对话框
+            if (context.mounted) {
+              Navigator.of(context).pop();
+            }
+            throw e;
+          }
+        } else {
+          throw Exception('无法读取文件内容');
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导入失败: $e')),
+        );
+      }
+    }
+  }
+
+  /// 选择学期课表 JSON 文件
+  Future<void> _pickSemesterJsonFile(BuildContext context, AppProvider provider) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.single;
+
+        if (file.bytes != null) {
+          // 显示进度对话框
+          if (context.mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (dialogContext) => const PopScope(
+                canPop: false,
+                child: AlertDialog(
+                  title: Row(
+                    children: [
+                      SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 12),
+                      Text('正在导入 JSON...'),
+                    ],
+                  ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('正在解析 JSON 数据...'),
+                      SizedBox(height: 16),
+                      LinearProgressIndicator(),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+
+          try {
+            // 使用 JSON 解析器
+            await provider.parseSemesterJsonBytes(file.bytes!);
+
+            // 关闭进度对话框
+            if (context.mounted) {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('学期课表 JSON 导入成功！')),
+              );
+            }
+          } catch (e) {
+            // 关闭进度对话框
+            if (context.mounted) {
+              Navigator.of(context).pop();
+            }
+            throw e;
+          }
+        } else {
+          throw Exception('无法读取文件内容');
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('JSON 导入失败: $e')),
+        );
+      }
+    }
+  }
+
+  /// 清除学期课表数据
+  Future<void> _clearSemesterData(BuildContext context, AppProvider provider) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认清除'),
+        content: const Text('确定要清除学期课表数据吗？此操作不可恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('清除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await provider.clearSemesterData();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('学期课表已清除')),
+        );
+      }
+    }
   }
 
   /// 筛选查看项

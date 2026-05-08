@@ -4,12 +4,14 @@ class Course {
   final String? teacher; // 教师姓名（可选）
   final String weekday; // 星期几
   final int period; // 第几节
+  final String? rawText; // 原始未加工的文本内容
 
   Course({
     required this.name,
     this.teacher,
     required this.weekday,
     required this.period,
+    this.rawText,
   });
 
   /// 获取显示名称（包含教师信息）

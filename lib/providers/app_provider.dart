@@ -3,8 +3,11 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import '../models/course.dart';
+import '../models/course_with_week.dart';
 import '../models/reminder.dart';
 import '../services/excel_parser_service.dart';
+import '../services/semester_excel_parser.dart';
+import '../services/semester_json_parser.dart';
 import '../services/wifi_service.dart';
 import '../services/storage_service.dart';
 import '../services/reminder_service.dart';
@@ -644,5 +647,109 @@ class AppProvider extends ChangeNotifier {
     stopWifiScan();
     _wifiService.dispose();
     super.dispose();
+  }
+
+  // ========== 学期课表相关 ==========
+
+  /// 学期课表教室数据
+  List<SemesterClassroom> _semesterClassrooms = [];
+  List<SemesterClassroom> get semesterClassrooms => _semesterClassrooms;
+
+  /// 当前选中的周次（用于学期总览）
+  int _selectedWeek = 1;
+  int get selectedWeek => _selectedWeek;
+
+  /// 是否有学期课表数据
+  bool get hasSemesterData => _semesterClassrooms.isNotEmpty;
+
+  /// 设置选中的周次
+  void setSelectedWeek(int week) {
+    if (week >= 1 && week <= 18) {
+      _selectedWeek = week;
+      notifyListeners();
+    }
+  }
+
+  /// 加载学期课表数据
+  Future<void> loadSemesterClassrooms(List<SemesterClassroom> classrooms) async {
+    _semesterClassrooms = classrooms;
+    notifyListeners();
+    // 保存到本地存储
+    await _storageService.saveSemesterClassrooms(classrooms);
+  }
+
+  /// 从存储加载学期课表数据
+  Future<void> loadSemesterDataFromStorage() async {
+    _semesterClassrooms = await _storageService.getSemesterClassrooms();
+    notifyListeners();
+  }
+
+  /// 清除学期课表数据
+  Future<void> clearSemesterData() async {
+    _semesterClassrooms = [];
+    _selectedWeek = 1;
+    notifyListeners();
+    await _storageService.clearSemesterClassrooms();
+  }
+
+  /// 导入学期课表（Web版）- 同步版本
+  Future<void> parseSemesterExcelBytes(Uint8List bytes) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final classrooms = SemesterExcelParser.parseSemesterExcel(bytes);
+      await loadSemesterClassrooms(classrooms);
+      _error = null;
+    } catch (e) {
+      _error = '学期课表解析失败: $e';
+      throw Exception(_error);
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// 导入学期课表（Web版）- 异步分批版本，带进度回调
+  /// [onProgress] - 进度回调 (current, total, message)
+  Future<void> parseSemesterExcelBytesAsync(
+    Uint8List bytes, {
+    required void Function(int current, int total, String message) onProgress,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final classrooms = await SemesterExcelParser.parseSemesterExcelAsync(
+        bytes,
+        onProgress: onProgress,
+      );
+      await loadSemesterClassrooms(classrooms);
+      _error = null;
+    } catch (e) {
+      _error = '学期课表解析失败: $e';
+      throw Exception(_error);
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// 导入学期课表 JSON 文件
+  Future<void> parseSemesterJsonBytes(Uint8List bytes) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final classrooms = SemesterJsonParser.parseSemesterJson(bytes);
+      await loadSemesterClassrooms(classrooms);
+      _error = null;
+    } catch (e) {
+      _error = '学期课表 JSON 解析失败: $e';
+      throw Exception(_error);
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
   }
 }

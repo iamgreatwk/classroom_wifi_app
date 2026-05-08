@@ -80,7 +80,7 @@ class ExcelParserService {
       }
 
       // 解析该教室的课程数据
-      final schedule = _parseClassroomSchedule(worksheet, rowIndex, isSunday: isSunday);
+      final schedule = _parseClassroomSchedule(worksheet, rowIndex, roomName, isSunday: isSunday);
       
       if (schedule.isNotEmpty) {
         classrooms.add(Classroom(
@@ -148,7 +148,8 @@ class ExcelParserService {
   /// [isSunday] - true表示解析周日课表，false表示解析周一到周六课表
   static Map<String, Map<int, Course>> _parseClassroomSchedule(
     Sheet worksheet,
-    int startRow, {
+    int startRow,
+    String roomName, {
     bool isSunday = false,
   }) {
     final schedule = <String, Map<int, Course>>{};
@@ -158,7 +159,8 @@ class ExcelParserService {
     if (isSunday) {
       daysToParse = ['星期日'];
     } else {
-      daysToParse = weekdays; // 周一到周六
+      // 主数据只导入周一到周六，排除周日
+      daysToParse = weekdays.where((day) => day != '星期日').toList();
     }
 
     // 遍历每一天
@@ -177,18 +179,47 @@ class ExcelParserService {
           final cellVal = _getCellValue(row, col);
           if (cellVal.isNotEmpty) {
             final parsed = _cleanCourseText(cellVal);
-            if (parsed['name']!.isNotEmpty) {
+            final courseName = parsed['name']!;
+            
+            if (courseName.isNotEmpty) {
+              // 处理屏蔽情况：向前查找有效课程
+              String finalCourseName = courseName;
+              String? finalTeacher = parsed['teacher'];
+              
+              if (courseName == '__BLOCKED__') {
+                // 向前查找（前一节、再前一节...）
+                for (int prevPeriod = period - 1; prevPeriod >= 1; prevPeriod--) {
+                  if (daySchedule.containsKey(prevPeriod)) {
+                    final prevCourse = daySchedule[prevPeriod]!;
+                    finalCourseName = prevCourse.name;
+                    finalTeacher = prevCourse.teacher;
+                    break;
+                  }
+                }
+                // 如果向前查找失败，跳过这一节
+                if (finalCourseName == '__BLOCKED__') {
+                  continue;
+                }
+              }
+              
               daySchedule[period] = Course(
-                name: parsed['name']!,
-                teacher: parsed['teacher'],
+                name: finalCourseName,
+                teacher: finalTeacher,
                 weekday: wd,
                 period: period,
+                rawText: cellVal, // 保存原始文本
               );
             }
           }
         }
       }
 
+      // 处理 ABAB 交替模式：统一为 AAAA
+      _normalizeAlternatePattern(daySchedule);
+      
+      // 处理 217 教室特殊课程名统一
+      _normalize217ThursdayCourses(daySchedule, classroomName: roomName, weekday: wd);
+      
       if (daySchedule.isNotEmpty) {
         schedule[wd] = daySchedule;
       }
@@ -197,11 +228,124 @@ class ExcelParserService {
     return schedule;
   }
 
+  /// 检查是否是屏蔽文本
+  static bool _isBlockedText(String text) {
+    return text.contains('教室资源时间屏蔽') || text.contains('教室资源屏蔽');
+  }
+
+  /// 217 教室特殊课程名统一处理
+  /// 周四下午6-8节：图像处理相关课程统一（不显示教师）
+  /// 周三下午8-9节：论文写作相关课程统一（不显示教师）
+  static void _normalize217ThursdayCourses(
+    Map<int, Course> daySchedule, {
+    String? classroomName,
+    String? weekday,
+  }) {
+    // 支持 "番禺教学大楼217" 或 "番禺教学大楼217室" 等变体
+    if (classroomName == null || !classroomName.contains('217')) return;
+
+    // 周四下午6-8节：图像处理课程统一（不显示教师）
+    if (weekday == '星期四') {
+      const targetPeriods = [6, 7, 8];
+      const unifiedName = '图像处理与机器视觉';
+      const alternativeNames = ['数字图像处理', '图像工程与处理'];
+
+      for (final period in targetPeriods) {
+        if (daySchedule.containsKey(period)) {
+          final course = daySchedule[period]!;
+          // 精确匹配：统一名称或替代名称
+          if (course.name == unifiedName || alternativeNames.contains(course.name)) {
+            daySchedule[period] = Course(
+              name: unifiedName,
+              teacher: null, // 不显示教师
+              weekday: course.weekday,
+              period: course.period,
+              rawText: course.rawText,
+            );
+          }
+        }
+      }
+    }
+
+    // 周三下午8-9节：论文写作课程统一（不显示教师）
+    if (weekday == '星期三') {
+      const targetPeriods = [8, 9];
+      const unifiedName = '学术论文写作与规范';
+
+      for (final period in targetPeriods) {
+        if (daySchedule.containsKey(period)) {
+          final course = daySchedule[period]!;
+          final name = course.name;
+          // 模糊匹配：包含论文写作和学术/规范
+          final isThesisWriting = name.contains('论文写作') && 
+                                 (name.contains('学术') || name.contains('规范'));
+          if (isThesisWriting) {
+            daySchedule[period] = Course(
+              name: unifiedName,
+              teacher: null, // 不显示教师
+              weekday: course.weekday,
+              period: course.period,
+              rawText: course.rawText,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  /// 处理 ABAB 交替排课模式，统一为 AAAA 连续模式
+  /// 例如：数学、英语、数学、英语 → 数学、数学、数学、数学
+  static void _normalizeAlternatePattern(Map<int, Course> daySchedule) {
+    if (daySchedule.length < 4) return;
+    
+    // 获取所有有课程的节次（按顺序）
+    final periods = daySchedule.keys.toList()..sort();
+    if (periods.length < 4) return;
+    
+    // 检查是否有 ABAB 模式（至少4节课交替）
+    // 要求：第1节和第3节相同，第2节和第4节相同，且第1节和第2节不同
+    final firstCourse = daySchedule[periods[0]];
+    final secondCourse = daySchedule[periods[1]];
+    final thirdCourse = daySchedule[periods[2]];
+    final fourthCourse = daySchedule[periods[3]];
+    
+    if (firstCourse == null || secondCourse == null || 
+        thirdCourse == null || fourthCourse == null) return;
+    
+    // 检查是否是 ABAB 模式
+    final isABAB = firstCourse.name == thirdCourse.name &&
+                   firstCourse.teacher == thirdCourse.teacher &&
+                   secondCourse.name == fourthCourse.name &&
+                   secondCourse.teacher == fourthCourse.teacher &&
+                   (firstCourse.name != secondCourse.name ||
+                    firstCourse.teacher != secondCourse.teacher);
+    
+    if (isABAB) {
+      // 统一使用第一节的课程信息（A）
+      for (int i = 1; i < periods.length; i++) {
+        final period = periods[i];
+        final originalCourse = daySchedule[period]!;
+        daySchedule[period] = Course(
+          name: firstCourse.name,
+          teacher: firstCourse.teacher,
+          weekday: originalCourse.weekday,
+          period: originalCourse.period,
+          rawText: originalCourse.rawText, // 保留原始文本
+        );
+      }
+    }
+  }
+
   /// 清理课程文本，提取课程名和教师名
   /// 返回 Map 包含 'name' 和 'teacher'
   /// 参考Python代码中的clean_course_text函数
   static Map<String, String?> _cleanCourseText(String text) {
     if (text.isEmpty) return {'name': '', 'teacher': null};
+    
+    // 如果是屏蔽文本，返回特殊标记，让调用方处理向前查找
+    if (_isBlockedText(text)) {
+      return {'name': '__BLOCKED__', 'teacher': null, 'rawText': text};
+    }
 
     String? teacher;
     String courseName = text;
