@@ -1545,7 +1545,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
       final rowsJson = jsonEncode(rows);
 
       // 执行 Canvas 绘制和下载（仅 Web 平台）
-      if (!kIsWeb) return;
+      if (!kIsWeb) return null;
       
       js.context.callMethod('eval', ['''
         (function() {
