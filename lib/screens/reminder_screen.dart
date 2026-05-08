@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import '../models/reminder.dart';
@@ -849,7 +850,8 @@ class _ImportButton extends StatelessWidget {
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.single;
 
-        if (AppConfig.isWebMode) {
+        if (kIsWeb) {
+          // Web环境：使用bytes
           if (file.bytes != null) {
             await provider.parseExcelBytes(file.bytes!, isSunday: isSunday);
             if (context.mounted) {
@@ -863,6 +865,7 @@ class _ImportButton extends StatelessWidget {
             throw Exception('Web 环境下无法读取文件');
           }
         } else {
+          // Android/iOS环境：使用path
           if (file.path != null) {
             await provider.parseExcelFile(file.path!, isSunday: isSunday);
             if (context.mounted) {

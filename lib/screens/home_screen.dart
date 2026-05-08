@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import '../providers/app_provider.dart';
@@ -412,7 +413,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.single;
 
-        if (AppConfig.isWebMode) {
+        if (kIsWeb) {
           // Web环境：使用bytes（无path属性）
           if (file.bytes != null) {
             if (mounted) {
@@ -429,7 +430,7 @@ class _HomeScreenState extends State<HomeScreen> {
             throw Exception('Web环境下无法读取文件');
           }
         } else {
-          // Android环境：使用path
+          // Android/iOS环境：使用path
           if (file.path != null) {
             if (mounted) {
               await context.read<AppProvider>().parseExcelFile(file.path!, isSunday: isSunday);
