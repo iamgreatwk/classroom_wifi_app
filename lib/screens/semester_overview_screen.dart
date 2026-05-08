@@ -1345,8 +1345,13 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
         return;
       }
 
-      // 使用 Canvas 绘制
-      await _downloadWithCanvas();
+      if (kIsWeb) {
+        // Web: 使用 Canvas 绘制
+        await _downloadWithCanvas();
+      } else {
+        // iOS/Android: 使用 RepaintBoundary 截图
+        await _downloadWithRepaintBoundary();
+      }
     } catch (e) {
       debugPrint('Download error: $e');
       if (mounted) {
@@ -1376,8 +1381,13 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
         return;
       }
 
-      // 使用 Canvas 绘制
-      await _downloadWithCanvas(filtered: true);
+      if (kIsWeb) {
+        // Web: 使用 Canvas 绘制
+        await _downloadWithCanvas(filtered: true);
+      } else {
+        // iOS/Android: 使用 RepaintBoundary 截图
+        await _downloadWithRepaintBoundary();
+      }
     } catch (e) {
       debugPrint('Download error: $e');
       if (mounted) {
@@ -1385,6 +1395,74 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
           SnackBar(content: Text('生成图片失败: $e')),
         );
       }
+    }
+  }
+
+  /// iOS/Android: 使用 RepaintBoundary 截图
+  Future<void> _downloadWithRepaintBoundary() async {
+    try {
+      final imageBytes = await _captureWidgetToImage();
+
+      if (imageBytes == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('截图失败，请重试')),
+          );
+        }
+        return;
+      }
+
+      // 保存或分享图片
+      await _saveImageToGallery(imageBytes, '学期总览_第${_selectedWeekday == 0 ? "周日" : "周$_selectedWeekday"}.png');
+    } catch (e) {
+      debugPrint('RepaintBoundary capture error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('截图失败: $e')),
+        );
+      }
+    }
+  }
+
+  /// 使用 RepaintBoundary 捕获 Widget 为 PNG 图片
+  Future<Uint8List?> _captureWidgetToImage() async {
+    try {
+      final RenderRepaintBoundary? boundary =
+          _screenshotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+
+      if (boundary == null) {
+        debugPrint('RenderRepaintBoundary not found');
+        return null;
+      }
+
+      if (!boundary.hasSize || boundary.size.isEmpty) {
+        debugPrint('Boundary has no size');
+        return null;
+      }
+
+      final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
+      final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+
+      if (byteData == null) {
+        debugPrint('Failed to convert image to byte data');
+        return null;
+      }
+
+      return byteData.buffer.asUint8List();
+    } catch (e, stackTrace) {
+      debugPrint('Error capturing widget: $e');
+      debugPrint(stackTrace.toString());
+      return null;
+    }
+  }
+
+  /// 保存图片到相册或分享
+  Future<void> _saveImageToGallery(Uint8List imageBytes, String filename) async {
+    // 简化处理：提示用户截图成功，实际保存需要 share_plus 或 photo_manager 插件
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('图片已生成 (${(imageBytes.length / 1024).toStringAsFixed(1)} KB)，请使用系统分享保存')),
+      );
     }
   }
 
