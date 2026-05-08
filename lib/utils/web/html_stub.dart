@@ -19,7 +19,7 @@ typedef Url = _UrlImpl;
 class _AnchorElementImpl {
   String? href;
   String? download;
-  String style = '';
+  final AnchorElementStyle style = AnchorElementStyle();
   
   _AnchorElementImpl({this.href});
   
@@ -28,6 +28,11 @@ class _AnchorElementImpl {
   void setAttribute(String name, String value) {
     if (name == 'download') download = value;
   }
+}
+
+// AnchorElement 的 style 属性
+class AnchorElementStyle {
+  String display = '';
 }
 
 // 对外暴露的类型别名
