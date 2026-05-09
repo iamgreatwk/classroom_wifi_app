@@ -1467,9 +1467,9 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     return classroomFiltered.where((classroom) {
       final courses = classroom.getCoursesForWeekday(currentWeekday);
       return courses.any((course) {
-        if (!_selectedCourseTypes.contains(course.courseType)) return false;
-        if (!_selectedWeekTypes.contains(course.isSingleWeek ? 'single' : 'continuous')) return false;
-        return course.weeks.contains(currentWeek);
+        if (!_matchesCourseTypeFilter(course)) return false;
+        if (!_matchesWeekTypeFilter(course)) return false;
+        return course.hasClassInWeek(currentWeek);
       });
     }).toList();
   }
@@ -1727,9 +1727,9 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
       final period = i + 1;
       final courses = classroom.getCoursesForPeriod(weekday, period);
       final filteredCourses = courses.where((course) {
-        if (!_selectedCourseTypes.contains(course.courseType)) return false;
-        if (!_selectedWeekTypes.contains(course.isSingleWeek ? 'single' : 'continuous')) return false;
-        return course.weeks.contains(currentWeek);
+        if (!_matchesCourseTypeFilter(course)) return false;
+        if (!_matchesWeekTypeFilter(course)) return false;
+        return course.hasClassInWeek(currentWeek);
       }).toList();
 
       if (filteredCourses.isEmpty) {

@@ -84,4 +84,20 @@ class SemesterClassroom {
     }
     return result;
   }
+
+  /// 获取指定星期的所有课程（不分节次）
+  List<CourseWithWeek> getCoursesForWeekday(String weekday) {
+    final result = <CourseWithWeek>[];
+    final daySchedule = schedule[weekday];
+    if (daySchedule == null) return [];
+    for (final periodCourses in daySchedule.values) {
+      result.addAll(periodCourses);
+    }
+    return result;
+  }
+
+  /// 获取指定星期和节次的所有课程（别名，与 getCourses 相同）
+  List<CourseWithWeek> getCoursesForPeriod(String weekday, int period) {
+    return getCourses(weekday, period);
+  }
 }
