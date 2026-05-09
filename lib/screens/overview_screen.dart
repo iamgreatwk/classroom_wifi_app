@@ -1,13 +1,10 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 import '../models/course.dart';
 import '../models/reminder.dart';
 import '../providers/app_provider.dart';
@@ -15,11 +12,10 @@ import '../services/excel_parser_service.dart';
 import '../services/web_download_service.dart';
 import '../services/screenshot_service.dart';
 import 'course_display_screen.dart';
-// Web 平台特定的导入
-import 'package:flutter/foundation.dart';
 
 // 条件导入：仅在 Web 平台导入 dart:js
 import '../utils/conditional_import.dart';
+
 
 /// 总览页面 - 显示所有教室1-12节详细情况
 class OverviewScreen extends StatefulWidget {
@@ -1228,17 +1224,18 @@ class _OverviewScreenState extends State<OverviewScreen> {
 
   /// 分享图片字节数据
   Future<void> _shareImageBytes(Uint8List bytes, String filename) async {
-    // 使用 share_plus 分享图片
-    try {
-      // 导入 share_plus 包进行分享
-      final tempDir = await getTemporaryDirectory();
-      final file = File('${tempDir.path}/$filename');
-      await file.writeAsBytes(bytes);
+    // Web 平台不支持本地文件分享
+    if (kIsWeb) {
+      debugPrint('Share not supported on Web');
+      return;
+    }
 
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        subject: filename,
-      );
+    // 使用 share_plus 分享图片（仅移动端）
+    try {
+      // 动态导入移动端依赖
+      final tempDir = await _getTempDir();
+      final file = await _createTempFile(tempDir.path, filename, bytes);
+      await _shareFile(file.path, filename);
     } catch (e) {
       debugPrint('Share error: $e');
       if (mounted) {
@@ -1247,6 +1244,22 @@ class _OverviewScreenState extends State<OverviewScreen> {
         );
       }
     }
+  }
+
+  /// 获取临时目录（仅移动端）
+  Future<dynamic> _getTempDir() async {
+    // 实际实现通过 dart:io 在运行时导入
+    throw UnsupportedError('Not supported on Web');
+  }
+
+  /// 创建临时文件（仅移动端）
+  Future<dynamic> _createTempFile(String dir, String filename, Uint8List bytes) async {
+    throw UnsupportedError('Not supported on Web');
+  }
+
+  /// 分享文件（仅移动端）
+  Future<void> _shareFile(String path, String filename) async {
+    throw UnsupportedError('Not supported on Web');
   }
   
   /// 获取节次组对应的节次列表

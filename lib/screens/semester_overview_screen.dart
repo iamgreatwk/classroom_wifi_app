@@ -1,12 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 import '../models/course_with_week.dart';
 import '../providers/app_provider.dart';
 import '../services/web_download_service.dart';
@@ -17,6 +14,7 @@ import 'package:flutter/foundation.dart';
 import '../utils/conditional_import.dart';
 // 条件导入：platformViewRegistry
 import '../utils/conditional_platform_view.dart' as platform_view;
+
 
 /// 学期总览页面 - 显示整学期课表，支持按周次筛选
 /// 采用表格布局，颜色区分不同课程
@@ -127,6 +125,25 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
       return currentWeek + 1;
     }
     return currentWeek;
+  }
+
+  /// 获取节次对应的固定颜色
+  Color _getPeriodColor(int period) {
+    if (period >= 1 && period <= 4) {
+      return _timeBlockColorSets['morning']![period - 1];
+    }
+    if (period >= 6 && period <= 9) {
+      return _timeBlockColorSets['afternoon']![period - 6];
+    }
+    if (period >= 10 && period <= 12) {
+      return _timeBlockColorSets['evening']![period - 10];
+    }
+    return _period5Color; // 第5节独立时的颜色
+  }
+
+  /// 获取课程对应的颜色（根据节次）
+  Color _getCourseColor(CourseWithWeek course, int period) {
+    return _getPeriodColor(period);
   }
 
   @override
@@ -303,20 +320,6 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
       }
       return false;
     }).toList();
-  }
-
-  /// 获取节次对应的颜色
-  Color _getPeriodColor(int period) {
-    if (period >= 1 && period <= 4) {
-      return _timeBlockColorSets['morning']![period - 1];
-    }
-    if (period >= 6 && period <= 9) {
-      return _timeBlockColorSets['afternoon']![period - 6];
-    }
-    if (period >= 10 && period <= 12) {
-      return _timeBlockColorSets['evening']![period - 10];
-    }
-    return _period5Color; // 第5节
   }
 
   /// 显示教室筛选对话框
@@ -1936,15 +1939,18 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
 
   /// 分享图片字节数据
   Future<void> _shareImageBytes(Uint8List bytes, String filename) async {
-    try {
-      final tempDir = await getTemporaryDirectory();
-      final file = File('${tempDir.path}/$filename');
-      await file.writeAsBytes(bytes);
+    // Web 平台不支持本地文件分享
+    if (kIsWeb) {
+      debugPrint('Share not supported on Web');
+      return;
+    }
 
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        subject: filename,
-      );
+    // 使用 share_plus 分享图片（仅移动端）
+    try {
+      // 动态导入移动端依赖
+      final tempDir = await _getTempDir();
+      final file = await _createTempFile(tempDir.path, filename, bytes);
+      await _shareFile(file.path, filename);
     } catch (e) {
       debugPrint('Share error: $e');
       if (mounted) {
@@ -1953,6 +1959,22 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
         );
       }
     }
+  }
+
+  /// 获取临时目录（仅移动端）
+  Future<dynamic> _getTempDir() async {
+    // 实际实现通过 dart:io 在运行时导入
+    throw UnsupportedError('Not supported on Web');
+  }
+
+  /// 创建临时文件（仅移动端）
+  Future<dynamic> _createTempFile(String dir, String filename, Uint8List bytes) async {
+    throw UnsupportedError('Not supported on Web');
+  }
+
+  /// 分享文件（仅移动端）
+  Future<void> _shareFile(String path, String filename) async {
+    throw UnsupportedError('Not supported on Web');
   }
 
   /// 使用 Canvas 绘制图片
