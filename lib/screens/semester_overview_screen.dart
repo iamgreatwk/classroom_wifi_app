@@ -3012,12 +3012,17 @@ class _SemesterScreenshotPreviewDialogState extends State<_SemesterScreenshotPre
         })();
       ''';
 
+      // 初始化结果变量
+      js.context['flutterShareResult'] = null;
       js.context.callMethod('eval', [script]);
 
-      // 等待结果
-      await Future.delayed(const Duration(milliseconds: 1000));
-
-      final result = js.context['flutterShareResult'] as String?;
+      // 等待结果，最多等待 5 秒
+      String? result;
+      for (int i = 0; i < 50; i++) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        result = js.context['flutterShareResult'] as String?;
+        if (result != null) break;
+      }
 
       if (mounted && result != null) {
         switch (result) {
@@ -3120,7 +3125,10 @@ class _SemesterScreenshotPreviewDialogState extends State<_SemesterScreenshotPre
                     boundaryMargin: const EdgeInsets.all(20),
                     minScale: 0.5,
                     maxScale: 4.0,
-                    child: _NativeImageView(dataUrl: widget.dataUrl),
+                    child: Image.network(
+                      widget.dataUrl,
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
               ),

@@ -1325,16 +1325,17 @@ class _OverviewScreenState extends State<OverviewScreen> {
             const rows = ${js.context['JSON'].callMethod('stringify', [rows])};
             const colorsJson = ${js.context['JSON'].callMethod('stringify', [colorsJson])};
             
-            // 尺寸配置
-            const classroomColWidth = 80;
-            const periodColWidth = 120;
-            const headerHeight = 50;
-            const rowHeight = 36;
-            const padding = 20;
-            const cornerRadius = 4;
-            
+            // 尺寸配置 - 适配老人使用：大字体、大间距
+            const scale = 2.5; // 高清缩放系数
+            const classroomColWidth = Math.floor(80 * scale);
+            const periodColWidth = Math.floor(120 * scale);
+            const headerHeight = Math.floor(50 * scale);
+            const rowHeight = Math.floor(40 * scale); // 更大的行高
+            const padding = Math.floor(20 * scale);
+            const cornerRadius = Math.floor(4 * scale);
+
             const canvasWidth = classroomColWidth + periodColWidth * 5 + padding * 2;
-            const canvasHeight = headerHeight + rows.length * rowHeight + padding * 2 + 60;
+            const canvasHeight = headerHeight + rows.length * rowHeight + padding * 2 + Math.floor(60 * scale);
             
             const canvas = document.createElement('canvas');
             canvas.width = canvasWidth;
@@ -1345,11 +1346,11 @@ class _OverviewScreenState extends State<OverviewScreen> {
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // 标题
+            // 标题 - 大字体
             ctx.fillStyle = '#1a1a1a';
-            ctx.font = 'bold 20px Arial, sans-serif';
+            ctx.font = 'bold ' + Math.floor(24 * scale) + 'px Arial, sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('${weekday}总览', canvasWidth / 2, padding + 25);
+            ctx.fillText('${weekday}总览', canvasWidth / 2, padding + Math.floor(30 * scale));
             
             let y = padding + 50;
             
@@ -1359,9 +1360,9 @@ class _OverviewScreenState extends State<OverviewScreen> {
             ctx.roundRect(padding, y, canvasWidth - padding * 2, headerHeight, [cornerRadius, cornerRadius, 0, 0]);
             ctx.fill();
             
-            // 表头文字
+            // 表头文字 - 大字体
             ctx.fillStyle = '#333333';
-            ctx.font = 'bold 14px Arial, sans-serif';
+            ctx.font = 'bold ' + Math.floor(16 * scale) + 'px Arial, sans-serif';
             ctx.textAlign = 'center';
             
             let x = padding;
@@ -1403,28 +1404,29 @@ class _OverviewScreenState extends State<OverviewScreen> {
                 ctx.lineTo(x, y + rowHeight);
                 ctx.stroke();
                 
-                // 单元格文字
+                // 单元格文字 - 大字体
                 if (cell && cell.length > 0) {
                   ctx.fillStyle = colIndex === 0 ? '#333333' : '#1a1a1a';
-                  ctx.font = colIndex === 0 ? 'bold 12px Arial, sans-serif' : '12px Arial, sans-serif';
+                  const fontSize = colIndex === 0 ? Math.floor(14 * scale) : Math.floor(13 * scale);
+                  ctx.font = colIndex === 0 ? 'bold ' + fontSize + 'px Arial, sans-serif' : fontSize + 'px Arial, sans-serif';
                   ctx.textAlign = 'center';
-                  
+
                   // 处理多行文本
                   const lines = cell.split('\\n');
-                  const lineHeight = 14;
+                  const lineHeight = Math.floor(16 * scale);
                   const startY = y + rowHeight / 2 - (lines.length - 1) * lineHeight / 2;
                   
                   lines.forEach((line, lineIndex) => {
                     // 文字截断
                     let displayText = line;
-                    const maxWidth = colWidth - 10;
+                    const maxWidth = colWidth - Math.floor(10 * scale);
                     if (ctx.measureText(displayText).width > maxWidth) {
                       while (ctx.measureText(displayText + '..').width > maxWidth && displayText.length > 0) {
                         displayText = displayText.slice(0, -1);
                       }
                       displayText += '..';
                     }
-                    ctx.fillText(displayText, x + colWidth / 2, startY + lineIndex * lineHeight + 4);
+                    ctx.fillText(displayText, x + colWidth / 2, startY + lineIndex * lineHeight + Math.floor(5 * scale));
                   });
                 }
                 
