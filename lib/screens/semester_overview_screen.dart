@@ -1430,8 +1430,8 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
           return false;
         }).toList();
       } else {
-        // 右侧按钮：下载所有选中的教室（包括无课的）
-        classroomsToCapture = classroomFiltered;
+        // 右侧按钮：下载所有分页中的教室（不受教室筛选影响，包括无课的）
+        classroomsToCapture = pageFiltered;
       }
 
       if (classroomsToCapture.isEmpty) {
@@ -1610,7 +1610,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     }
   }
 
-  /// 构建截图用的Widget - 参照参考图片样式（老年人友好）
+  /// 构建截图用的Widget - 参照参考图片样式（老年人友好，紧凑布局）
   Widget _buildScreenshotWidget(
     List<SemesterClassroom> classrooms,
     String currentWeekday,
@@ -1618,16 +1618,16 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   ) {
     final sortedClassrooms = _getSortedClassrooms(classrooms);
 
-    // 适配老年人的大字体配置
+    // 参照原图样式配置
     const double titleFontSize = 28;      // 标题字体
-    const double headerFontSize = 16;     // 表头字体
-    const double classroomFontSize = 18;  // 教室名字体
-    const double cellHeight = 40;         // 单元格高度
-    const double classroomColWidth = 70;  // 教室列宽度
+    const double headerFontSize = 14;     // 表头字体（减小避免换行）
+    const double classroomFontSize = 16;  // 教室名字体
+    const double cellHeight = 36;         // 单元格高度
+    const double classroomColWidth = 60;  // 教室列宽度
 
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1640,10 +1640,10 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
               color: Colors.black87,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           // 表头 - 参照图片：教室 + 1-12数字
           Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(vertical: 6),
             decoration: BoxDecoration(
               color: Colors.grey.shade200,
               borderRadius: const BorderRadius.only(
@@ -1678,6 +1678,8 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
                           fontWeight: FontWeight.bold,
                           color: Colors.black54,
                         ),
+                        overflow: TextOverflow.visible,
+                        softWrap: false,
                       ),
                     ),
                   );
@@ -1760,13 +1762,11 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
       }
 
       return Expanded(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
-          child: Container(
-            decoration: BoxDecoration(
-              color: cellColor,
-              borderRadius: BorderRadius.circular(2),
-            ),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 1, vertical: 2),
+          decoration: BoxDecoration(
+            color: cellColor,
+            borderRadius: BorderRadius.circular(1),
           ),
         ),
       );

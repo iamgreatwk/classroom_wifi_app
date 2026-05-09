@@ -919,17 +919,16 @@ class _OverviewScreenState extends State<OverviewScreen> {
   ) {
     final sortedClassrooms = _getSortedClassrooms(classrooms);
 
-    // 适配老年人的大字体配置
+    // 参照原图样式配置（紧凑布局）
     const double titleFontSize = 28;      // 标题字体
-    const double headerFontSize = 16;     // 表头字体
-    const double classroomFontSize = 18;  // 教室名字体
-    const double cellHeight = 40;         // 单元格高度
-    const double classroomColWidth = 70;  // 教室列宽度
-    const double spacing = 4;             // 间距
+    const double headerFontSize = 14;     // 表头字体（减小避免换行）
+    const double classroomFontSize = 16;  // 教室名字体
+    const double cellHeight = 36;         // 单元格高度
+    const double classroomColWidth = 60;  // 教室列宽度
 
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -942,10 +941,10 @@ class _OverviewScreenState extends State<OverviewScreen> {
               color: Colors.black87,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           // 表头 - 参照图片：教室 + 1-12数字
           Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(vertical: 6),
             decoration: BoxDecoration(
               color: Colors.grey.shade200,
               borderRadius: const BorderRadius.only(
@@ -980,6 +979,8 @@ class _OverviewScreenState extends State<OverviewScreen> {
                           fontWeight: FontWeight.bold,
                           color: Colors.black54,
                         ),
+                        overflow: TextOverflow.visible,
+                        softWrap: false,
                       ),
                     ),
                   );
@@ -1084,26 +1085,24 @@ class _OverviewScreenState extends State<OverviewScreen> {
           : Colors.white;
 
       return Expanded(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
-          child: Container(
-            decoration: BoxDecoration(
-              color: cellColor,
-              borderRadius: BorderRadius.circular(2),
-            ),
-            child: isAbsent
-                ? Center(
-                    child: Text(
-                      '缺',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: textColor,
-                      ),
-                    ),
-                  )
-                : null,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 1, vertical: 2),
+          decoration: BoxDecoration(
+            color: cellColor,
+            borderRadius: BorderRadius.circular(1),
           ),
+          child: isAbsent
+              ? Center(
+                  child: Text(
+                    '缺',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: textColor,
+                    ),
+                  ),
+                )
+              : null,
         ),
       );
     });
