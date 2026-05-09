@@ -16,6 +16,11 @@ import 'course_display_screen.dart';
 // 条件导入：仅在 Web 平台导入 dart:js
 import '../utils/conditional_import.dart';
 
+// 条件导入：仅在非 Web 平台导入 dart:io
+import 'dart:io' if (dart.library.html) 'dart:typed_data';
+import 'package:path_provider/path_provider.dart' if (dart.library.html) 'dart:typed_data';
+import 'package:share_plus/share_plus.dart' if (dart.library.html) 'dart:typed_data';
+
 
 /// 总览页面 - 显示所有教室1-12节详细情况
 class OverviewScreen extends StatefulWidget {
@@ -1251,19 +1256,23 @@ class _OverviewScreenState extends State<OverviewScreen> {
   }
 
   /// 获取临时目录（仅移动端）
-  Future<dynamic> _getTempDir() async {
-    // 实际实现通过 dart:io 在运行时导入
-    throw UnsupportedError('Not supported on Web');
+  Future<Directory> _getTempDir() async {
+    return await getTemporaryDirectory();
   }
 
   /// 创建临时文件（仅移动端）
-  Future<dynamic> _createTempFile(String dir, String filename, Uint8List bytes) async {
-    throw UnsupportedError('Not supported on Web');
+  Future<File> _createTempFile(String dir, String filename, Uint8List bytes) async {
+    final file = File('$dir/$filename');
+    await file.writeAsBytes(bytes);
+    return file;
   }
 
   /// 分享文件（仅移动端）
   Future<void> _shareFile(String path, String filename) async {
-    throw UnsupportedError('Not supported on Web');
+    await Share.shareXFiles(
+      [XFile(path)],
+      subject: filename,
+    );
   }
   
   /// 获取节次组对应的节次列表

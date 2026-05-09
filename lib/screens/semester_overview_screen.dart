@@ -15,6 +15,11 @@ import '../utils/conditional_import.dart';
 // 条件导入：platformViewRegistry
 import '../utils/conditional_platform_view.dart' as platform_view;
 
+// 条件导入：仅在非 Web 平台导入 dart:io
+import 'dart:io' if (dart.library.html) 'dart:typed_data';
+import 'package:path_provider/path_provider.dart' if (dart.library.html) 'dart:typed_data';
+import 'package:share_plus/share_plus.dart' if (dart.library.html) 'dart:typed_data';
+
 
 /// 学期总览页面 - 显示整学期课表，支持按周次筛选
 /// 采用表格布局，颜色区分不同课程
@@ -1970,19 +1975,23 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   }
 
   /// 获取临时目录（仅移动端）
-  Future<dynamic> _getTempDir() async {
-    // 实际实现通过 dart:io 在运行时导入
-    throw UnsupportedError('Not supported on Web');
+  Future<Directory> _getTempDir() async {
+    return await getTemporaryDirectory();
   }
 
   /// 创建临时文件（仅移动端）
-  Future<dynamic> _createTempFile(String dir, String filename, Uint8List bytes) async {
-    throw UnsupportedError('Not supported on Web');
+  Future<File> _createTempFile(String dir, String filename, Uint8List bytes) async {
+    final file = File('$dir/$filename');
+    await file.writeAsBytes(bytes);
+    return file;
   }
 
   /// 分享文件（仅移动端）
   Future<void> _shareFile(String path, String filename) async {
-    throw UnsupportedError('Not supported on Web');
+    await Share.shareXFiles(
+      [XFile(path)],
+      subject: filename,
+    );
   }
 
   /// 使用 Canvas 绘制图片
