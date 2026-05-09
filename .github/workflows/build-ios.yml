@@ -2,7 +2,7 @@ name: Build iOS (Unsigned)
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, ios ]
   workflow_dispatch:
 
 jobs:
