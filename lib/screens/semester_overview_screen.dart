@@ -63,8 +63,8 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   /// 是否正在截图中
   bool _isCapturing = false;
 
-  /// 是否展开筛选区域
-  bool _isFilterExpanded = true;
+  /// 是否展开筛选区域（默认折叠）
+  bool _isFilterExpanded = false;
 
   static const List<String> _weekdays = [
     '星期日',

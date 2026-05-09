@@ -43,8 +43,8 @@ class _OverviewScreenState extends State<OverviewScreen> {
   /// 教室多选筛选
   Set<String> _selectedClassrooms = {};
 
-  /// 是否展开筛选区域
-  bool _isFilterExpanded = true;
+  /// 是否展开筛选区域（默认折叠）
+  bool _isFilterExpanded = false;
 
   /// 当前显示的日期（默认为今天，但可以通过前一天/后一天切换）
   DateTime _selectedDate = DateTime.now();
