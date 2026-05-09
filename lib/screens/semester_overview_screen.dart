@@ -1365,7 +1365,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     }
   }
 
-  /// 下载筛选后的总览图片
+  /// 下载筛选后的总览图片（仅包含有课的教室）
   Future<void> _downloadFilteredOverviewImage() async {
     try {
       if (mounted) {
@@ -1389,7 +1389,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
         await _downloadWithCanvas(filtered: true);
       } else {
         // iOS/Android: 使用 RepaintBoundary 截图
-        await _downloadWithRepaintBoundary();
+        await _downloadWithRepaintBoundary(filtered: true);
       }
     } catch (e) {
       debugPrint('Download error: $e');
@@ -1402,22 +1402,42 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   }
 
   /// iOS/Android: 使用 RepaintBoundary 截图
-  Future<void> _downloadWithRepaintBoundary() async {
+  /// [filtered] - true: 只下载有课程的教室; false: 下载所有选中教室
+  Future<void> _downloadWithRepaintBoundary({bool filtered = false}) async {
     try {
-      final imageBytes = await _captureWidgetToImage();
+      final provider = context.read<AppProvider>();
+      final baseWeek = provider.selectedWeek;
+      final currentWeekday = _weekdays[_selectedWeekday];
+      final currentWeek = _getDisplayWeek(baseWeek, _selectedWeekday);
 
-      if (imageBytes == null) {
+      // 获取要截图的教室列表
+      List<SemesterClassroom> classroomsToCapture;
+      if (filtered) {
+        // 只包含有当前周课程的教室
+        classroomsToCapture = _getFilteredClassroomsWithCourses();
+      } else {
+        // 所有当前筛选的教室
+        final allClassrooms = provider.semesterClassrooms;
+        final pageFiltered = _applyPageFilter(allClassrooms);
+        classroomsToCapture = _applyClassroomFilter(pageFiltered);
+      }
+
+      if (classroomsToCapture.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('截图失败，请重试')),
+            const SnackBar(content: Text('没有符合条件的教室')),
           );
         }
         return;
       }
 
-      // 显示预览对话框
+      // 显示截图预览对话框（使用临时构建的Widget）
       if (mounted) {
-        _showMobileScreenshotPreview(imageBytes);
+        await _showMobileScreenshotPreviewWithClassrooms(
+          classroomsToCapture,
+          currentWeekday,
+          currentWeek,
+        );
       }
     } catch (e) {
       debugPrint('RepaintBoundary capture error: $e');
@@ -1427,6 +1447,318 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
         );
       }
     }
+  }
+
+  /// 获取有当前周课程的教室列表（用于筛选后下载）
+  List<SemesterClassroom> _getFilteredClassroomsWithCourses() {
+    final provider = context.read<AppProvider>();
+    final allClassrooms = provider.semesterClassrooms;
+    final baseWeek = provider.selectedWeek;
+    final currentWeekday = _weekdays[_selectedWeekday];
+    final currentWeek = _getDisplayWeek(baseWeek, _selectedWeekday);
+
+    // 应用分页筛选
+    final pageFiltered = _applyPageFilter(allClassrooms);
+
+    // 应用教室筛选
+    final classroomFiltered = _applyClassroomFilter(pageFiltered);
+
+    // 筛选出有当前周课程的教室
+    return classroomFiltered.where((classroom) {
+      final courses = classroom.getCoursesForWeekday(currentWeekday);
+      return courses.any((course) {
+        if (!_selectedCourseTypes.contains(course.courseType)) return false;
+        if (!_selectedWeekTypes.contains(course.isSingleWeek ? 'single' : 'continuous')) return false;
+        return course.weeks.contains(currentWeek);
+      });
+    }).toList();
+  }
+
+  /// 使用指定教室列表显示移动端截图预览
+  Future<void> _showMobileScreenshotPreviewWithClassrooms(
+    List<SemesterClassroom> classrooms,
+    String currentWeekday,
+    int currentWeek,
+  ) async {
+    // 构建截图Widget
+    final screenshotWidget = _buildScreenshotWidget(
+      classrooms,
+      currentWeekday,
+      currentWeek,
+    );
+
+    // 创建一个临时GlobalKey来截图
+    final screenshotKey = GlobalKey();
+
+    // 显示对话框并截图
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 标题栏
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(26),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.image, color: Colors.grey),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '学期总览 - $currentWeekday 第$currentWeek周',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+            ),
+            // 截图区域
+            Flexible(
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.65,
+                ),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                ),
+                child: RepaintBoundary(
+                  key: screenshotKey,
+                  child: screenshotWidget,
+                ),
+              ),
+            ),
+            // 底部按钮
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(26),
+                    blurRadius: 4,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      final imageBytes = await _captureWidgetToImageWithKey(screenshotKey);
+                      if (imageBytes != null) {
+                        await _shareImageBytes(
+                          imageBytes,
+                          '学期总览_${currentWeekday}_第${currentWeek}周.png',
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.share),
+                    label: const Text('分享'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 使用指定的GlobalKey截图
+  Future<Uint8List?> _captureWidgetToImageWithKey(GlobalKey key) async {
+    try {
+      final RenderRepaintBoundary? boundary =
+          key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+
+      if (boundary == null) {
+        debugPrint('RenderRepaintBoundary not found');
+        return null;
+      }
+
+      if (!boundary.hasSize || boundary.size.isEmpty) {
+        debugPrint('Boundary has no size');
+        return null;
+      }
+
+      final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
+      final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+
+      if (byteData == null) {
+        debugPrint('Failed to convert image to byte data');
+        return null;
+      }
+
+      return byteData.buffer.asUint8List();
+    } catch (e, stackTrace) {
+      debugPrint('Error capturing widget: $e');
+      debugPrint(stackTrace.toString());
+      return null;
+    }
+  }
+
+  /// 构建截图用的Widget
+  Widget _buildScreenshotWidget(
+    List<SemesterClassroom> classrooms,
+    String currentWeekday,
+    int currentWeek,
+  ) {
+    final sortedClassrooms = _getSortedClassrooms(classrooms);
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 标题
+          Text(
+            '$currentWeekday - 第$currentWeek周',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          // 表头
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            color: Colors.grey.shade100,
+            child: Row(
+              children: [
+                const SizedBox(width: 60, child: Text('教室', textAlign: TextAlign.center)),
+                ...List.generate(12, (i) {
+                  final period = i + 1;
+                  return Expanded(
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _getPeriodColor(period),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '$period',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+          // 教室列表
+          ...sortedClassrooms.map((classroom) {
+            final classroomNumber = classroom.name.replaceAll(RegExp(r'[^0-9]'), '');
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: Colors.grey.shade200),
+                ),
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 60,
+                    child: Text(
+                      classroomNumber,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  ..._buildPeriodCellsForScreenshot(
+                    context,
+                    classroom,
+                    currentWeekday,
+                    currentWeek,
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  /// 为截图构建节次单元格
+  List<Widget> _buildPeriodCellsForScreenshot(
+    BuildContext context,
+    SemesterClassroom classroom,
+    String weekday,
+    int currentWeek,
+  ) {
+    return List.generate(12, (i) {
+      final period = i + 1;
+      final courses = classroom.getCoursesForPeriod(weekday, period);
+      final filteredCourses = courses.where((course) {
+        if (!_selectedCourseTypes.contains(course.courseType)) return false;
+        if (!_selectedWeekTypes.contains(course.isSingleWeek ? 'single' : 'continuous')) return false;
+        return course.weeks.contains(currentWeek);
+      }).toList();
+
+      if (filteredCourses.isEmpty) {
+        return Expanded(
+          child: Container(
+            height: 20,
+            margin: const EdgeInsets.symmetric(horizontal: 1),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        );
+      }
+
+      final course = filteredCourses.first;
+      final color = _getCourseColor(course, period);
+
+      return Expanded(
+        child: Container(
+          height: 20,
+          margin: const EdgeInsets.symmetric(horizontal: 1),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+      );
+    });
   }
 
   /// 显示移动端截图预览对话框
@@ -2203,32 +2535,39 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: List.generate(7, (index) {
-                    final isSelected = _selectedWeekday == index;
-                    return InkWell(
-                      onTap: () => setState(() => _selectedWeekday = index),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          _weekdays[index].replaceAll('星期', '周'),
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : null,
-                            fontWeight:
-                                isSelected ? FontWeight.bold : null,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(7, (index) {
+                      final isSelected = _selectedWeekday == index;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: InkWell(
+                          onTap: () => setState(() => _selectedWeekday = index),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(
+                              _weekdays[index].replaceAll('星期', '周'),
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isSelected ? Colors.white : null,
+                                fontWeight:
+                                    isSelected ? FontWeight.bold : null,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  }),
+                      );
+                    }),
+                  ),
                 ),
               ),
 

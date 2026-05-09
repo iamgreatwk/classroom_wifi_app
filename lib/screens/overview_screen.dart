@@ -595,7 +595,8 @@ class _OverviewScreenState extends State<OverviewScreen> {
   /// 下载总览页面为图片（跨平台方案）
   /// Web: 使用 JavaScript Canvas 绘制
   /// iOS/Android: 使用 RepaintBoundary 截图
-  Future<void> _downloadOverviewImage() async {
+  /// [filtered] - true: 只下载有课程的教室; false: 下载所有选中教室
+  Future<void> _downloadOverviewImage({bool filtered = false}) async {
     try {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -605,10 +606,10 @@ class _OverviewScreenState extends State<OverviewScreen> {
 
       if (kIsWeb) {
         // Web 平台：使用 JavaScript Canvas
-        await _downloadOverviewImageWeb();
+        await _downloadOverviewImageWeb(filtered: filtered);
       } else {
         // iOS/Android：使用 RepaintBoundary 截图
-        await _downloadOverviewImageMobile();
+        await _downloadOverviewImageMobile(filtered: filtered);
       }
     } catch (e) {
       debugPrint('Download error: $e');
@@ -621,7 +622,8 @@ class _OverviewScreenState extends State<OverviewScreen> {
   }
 
   /// Web 平台：使用 JavaScript Canvas 绘制截图
-  Future<void> _downloadOverviewImageWeb() async {
+  /// [filtered] - true: 只下载有课程的教室; false: 下载所有选中教室
+  Future<void> _downloadOverviewImageWeb({bool filtered = false}) async {
     // 获取数据
     final provider = context.read<AppProvider>();
     final allClassrooms = provider.classrooms;
@@ -637,7 +639,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
 
     final pages = _getFilteredPages(allClassrooms, provider);
     final selectedPages = provider.selectedOverviewPages;
-    final now = DateTime.now();
+    final now = _selectedDate;
     final weekday = ExcelParserService.getWeekdayName(now);
 
     // 合并选中的教室
@@ -650,7 +652,33 @@ class _OverviewScreenState extends State<OverviewScreen> {
       uniqueClassrooms.addAll(pageEntry.value);
     }
 
-    final sortedClassrooms = _getSortedClassrooms(uniqueClassrooms.toList());
+    // 应用教室筛选
+    var sortedClassrooms = _getSortedClassrooms(uniqueClassrooms.toList());
+    if (_selectedClassrooms.isNotEmpty) {
+      sortedClassrooms = sortedClassrooms
+          .where((c) => _selectedClassrooms.contains(c.name))
+          .toList();
+    }
+
+    // 应用有课筛选
+    if (filtered) {
+      sortedClassrooms = sortedClassrooms.where((classroom) {
+        return classroom.schedules.any((schedule) {
+          if (schedule.weekday != weekday) return false;
+          return _matchesCourseTypeFilter(schedule.course);
+        });
+      }).toList();
+    }
+
+    if (sortedClassrooms.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('没有符合条件的教室')),
+        );
+      }
+      return;
+    }
+
     final absentMap = provider.absentClassrooms;
 
     // 构建表头
@@ -729,23 +757,57 @@ class _OverviewScreenState extends State<OverviewScreen> {
   }
 
   /// iOS/Android 平台：使用 RepaintBoundary 截图并保存到相册
-  Future<void> _downloadOverviewImageMobile() async {
-    // 使用 RepaintBoundary 截图
-    final imageBytes = await _captureWidgetToImage();
+  /// [filtered] - true: 只下载有课程的教室; false: 下载所有选中教室
+  Future<void> _downloadOverviewImageMobile({bool filtered = false}) async {
+    final provider = context.read<AppProvider>();
+    final weekday = ExcelParserService.getWeekdayName(_selectedDate);
 
-    if (imageBytes == null) {
+    // 获取当前显示的教室列表
+    final pages = _getFilteredPages(provider.classrooms, provider);
+    final selectedPages = provider.selectedOverviewPages;
+    final allSelectedClassrooms = <Classroom>[];
+    for (final page in pages) {
+      if (selectedPages.contains(page.key)) {
+        allSelectedClassrooms.addAll(page.value);
+      }
+    }
+    final seen = <String>{};
+    var classroomsToCapture = allSelectedClassrooms
+        .where((c) => seen.add(c.name))
+        .toList();
+
+    // 应用教室筛选
+    if (_selectedClassrooms.isNotEmpty) {
+      classroomsToCapture = classroomsToCapture
+          .where((c) => _selectedClassrooms.contains(c.name))
+          .toList();
+    }
+
+    // 应用有课筛选
+    if (filtered) {
+      classroomsToCapture = classroomsToCapture.where((classroom) {
+        return classroom.schedules.any((schedule) {
+          if (schedule.weekday != weekday) return false;
+          return _matchesCourseTypeFilter(schedule.course);
+        });
+      }).toList();
+    }
+
+    if (classroomsToCapture.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('截图失败，请重试')),
+          const SnackBar(content: Text('没有符合条件的教室')),
         );
       }
       return;
     }
 
-    // 显示预览对话框
-    if (mounted) {
-      _showMobileScreenshotPreview(imageBytes);
-    }
+    // 使用临时Widget截图
+    await _showMobileScreenshotPreviewWithClassrooms(
+      classroomsToCapture,
+      weekday,
+      filtered,
+    );
   }
 
   /// 显示移动端截图预览对话框
@@ -872,6 +934,271 @@ class _OverviewScreenState extends State<OverviewScreen> {
         ),
       ),
     );
+  }
+
+  /// 使用指定教室列表显示移动端截图预览
+  Future<void> _showMobileScreenshotPreviewWithClassrooms(
+    List<Classroom> classrooms,
+    String weekday,
+    bool filtered,
+  ) async {
+    final screenshotKey = GlobalKey();
+    final now = _selectedDate;
+    final absentMap = context.read<AppProvider>().absentClassrooms;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 标题栏
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(26),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.image, color: Colors.grey),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '今日总览 - $weekday${filtered ? "（有课教室）" : ""}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+            ),
+            // 截图区域
+            Flexible(
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.65,
+                ),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                ),
+                child: SingleChildScrollView(
+                  child: RepaintBoundary(
+                    key: screenshotKey,
+                    child: _buildScreenshotWidget(classrooms, weekday, now, absentMap),
+                  ),
+                ),
+              ),
+            ),
+            // 底部按钮
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(26),
+                    blurRadius: 4,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      final boundary = screenshotKey.currentContext?.findRenderObject()
+                          as RenderRepaintBoundary?;
+                      if (boundary == null) return;
+
+                      final image = await boundary.toImage(pixelRatio: 2.0);
+                      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+                      if (byteData == null) return;
+
+                      final imageBytes = byteData.buffer.asUint8List();
+                      await _shareImageBytes(
+                        imageBytes,
+                        '今日总览_$weekday${filtered ? "_筛选" : ""}.png',
+                      );
+                    },
+                    icon: const Icon(Icons.share),
+                    label: const Text('分享'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建截图用的Widget
+  Widget _buildScreenshotWidget(
+    List<Classroom> classrooms,
+    String weekday,
+    DateTime now,
+    Map<int, Set<String>> absentMap,
+  ) {
+    final sortedClassrooms = _getSortedClassrooms(classrooms);
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 标题
+          Text(
+            '$weekday - ${now.month}/${now.day}',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          // 表头
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            color: Colors.grey.shade100,
+            child: Row(
+              children: [
+                const SizedBox(width: 52, child: Text('教室', textAlign: TextAlign.center)),
+                ...List.generate(12, (i) {
+                  final period = i + 1;
+                  final isCurrentPeriod = period == ExcelParserService.getCurrentPeriod(now);
+                  return Expanded(
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        decoration: isCurrentPeriod
+                            ? BoxDecoration(
+                                color: _currentPeriodColor,
+                                borderRadius: BorderRadius.circular(4),
+                              )
+                            : null,
+                        child: Text(
+                          '$period',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: isCurrentPeriod ? FontWeight.bold : FontWeight.normal,
+                            color: isCurrentPeriod ? Colors.white : Colors.grey.shade700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+          // 教室列表
+          ...sortedClassrooms.map((classroom) {
+            final classroomNumber = classroom.name.replaceAll(RegExp(r'[^0-9]'), '');
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: Colors.grey.shade200),
+                ),
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 52,
+                    child: Text(
+                      classroomNumber,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  ..._buildPeriodCellsForScreenshot(
+                    classroom,
+                    weekday,
+                    now,
+                    absentMap,
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  /// 为截图构建节次单元格
+  List<Widget> _buildPeriodCellsForScreenshot(
+    Classroom classroom,
+    String weekday,
+    DateTime now,
+    Map<int, Set<String>> absentMap,
+  ) {
+    final provider = context.read<AppProvider>();
+
+    return List.generate(12, (i) {
+      final period = i + 1;
+      final hasCourse = classroom.hasCourseInPeriods(weekday, [period]);
+      final reminderId = getReminderIdForPeriod(period);
+      final isAbsent = hasCourse && reminderId != null &&
+          absentMap[reminderId]?.contains(classroom.name) == true;
+
+      Color cellColor;
+      if (hasCourse) {
+        cellColor = _getPeriodColor(period);
+      } else {
+        cellColor = Colors.grey.shade300;
+      }
+
+      return Expanded(
+        child: Container(
+          height: 24,
+          margin: const EdgeInsets.symmetric(horizontal: 1),
+          decoration: BoxDecoration(
+            color: cellColor,
+            borderRadius: BorderRadius.circular(3),
+          ),
+          child: isAbsent
+              ? Center(
+                  child: Text(
+                    '缺',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: cellColor.computeLuminance() > 0.35
+                          ? Colors.black
+                          : Colors.white,
+                    ),
+                  ),
+                )
+              : null,
+        ),
+      );
+    });
   }
 
   /// 保存图片到相册（iOS/Android）
@@ -1208,24 +1535,12 @@ class _OverviewScreenState extends State<OverviewScreen> {
       appBar: AppBar(
         title: const Text('今日总览'),
         backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-        leading: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 前一天按钮
-            IconButton(
-              icon: const Icon(Icons.chevron_left),
-              tooltip: '前一天',
-              onPressed: _goToPreviousDay,
-            ),
-          ],
+        leading: IconButton(
+          icon: const Icon(Icons.filter_alt_outlined),
+          tooltip: '下载筛选图片（有课的教室）',
+          onPressed: () => _downloadOverviewImage(filtered: true),
         ),
         actions: [
-          // 后一天按钮
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            tooltip: '后一天',
-            onPressed: _goToNextDay,
-          ),
           // 搜索按钮
           IconButton(
             icon: Icon(_showSearchBox ? Icons.close : Icons.search),
@@ -1244,10 +1559,23 @@ class _OverviewScreenState extends State<OverviewScreen> {
               });
             },
           ),
+          // 前一天按钮
+          IconButton(
+            icon: const Icon(Icons.chevron_left),
+            tooltip: '前一天',
+            onPressed: _goToPreviousDay,
+          ),
+          // 后一天按钮
+          IconButton(
+            icon: const Icon(Icons.chevron_right),
+            tooltip: '后一天',
+            onPressed: _goToNextDay,
+          ),
+          // 下载全部按钮
           IconButton(
             icon: const Icon(Icons.download),
-            tooltip: '下载为图片',
-            onPressed: _downloadOverviewImage,
+            tooltip: '下载全部图片',
+            onPressed: () => _downloadOverviewImage(filtered: false),
           ),
         ],
       ),
@@ -1405,31 +1733,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
                         _LegendItem(color: Colors.grey.shade300, label: '无课'),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    // 分页标签（多选）
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      alignment: WrapAlignment.center,
-                      children: pages.asMap().entries.map((entry) {
-                        final pageName = entry.value.key;
-                        final isSelected = provider.isOverviewPageSelected(pageName);
-
-                        return FilterChip(
-                          label: Text(pageName, style: const TextStyle(fontSize: 11)),
-                          selected: isSelected,
-                          onSelected: (_) {
-                            provider.toggleOverviewPage(pageName);
-                          },
-                          selectedColor: Theme.of(context).colorScheme.primaryContainer,
-                          backgroundColor: Colors.grey.shade200,
-                          checkmarkColor: Theme.of(context).colorScheme.primary,
-                          padding: EdgeInsets.zero,
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 4),
                     // 筛选栏标题 + 展开/收起按钮
                     InkWell(
                       onTap: () => setState(() => _isFilterExpanded = !_isFilterExpanded),
@@ -1453,6 +1757,18 @@ class _OverviewScreenState extends State<OverviewScreen> {
                           // 显示当前筛选状态摘要
                           if (!_isFilterExpanded) ...[
                             const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.purple.shade100,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '${provider.selectedOverviewPages.length}个分页',
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(
@@ -1483,6 +1799,30 @@ class _OverviewScreenState extends State<OverviewScreen> {
                     // 展开的筛选内容
                     if (_isFilterExpanded) ...[
                       const SizedBox(height: 8),
+                      // 分页标签（多选）
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        alignment: WrapAlignment.center,
+                        children: pages.asMap().entries.map((entry) {
+                          final pageName = entry.value.key;
+                          final isSelected = provider.isOverviewPageSelected(pageName);
+
+                          return FilterChip(
+                            label: Text(pageName, style: const TextStyle(fontSize: 11)),
+                            selected: isSelected,
+                            onSelected: (_) {
+                              provider.toggleOverviewPage(pageName);
+                            },
+                            selectedColor: Theme.of(context).colorScheme.primaryContainer,
+                            backgroundColor: Colors.grey.shade200,
+                            checkmarkColor: Theme.of(context).colorScheme.primary,
+                            padding: EdgeInsets.zero,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          );
+                        }).toList(),
+                      ),
+                      const Divider(height: 16),
                       // 课程类型筛选
                       Wrap(
                         spacing: 6,
