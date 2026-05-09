@@ -1524,7 +1524,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
                 ],
               ),
             ),
-            // 截图区域
+            // 截图区域 - 可滚动查看所有教室
             Flexible(
               child: Container(
                 constraints: BoxConstraints(
@@ -1533,9 +1533,11 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
                 decoration: const BoxDecoration(
                   color: Colors.white,
                 ),
-                child: RepaintBoundary(
-                  key: screenshotKey,
-                  child: screenshotWidget,
+                child: SingleChildScrollView(
+                  child: RepaintBoundary(
+                    key: screenshotKey,
+                    child: screenshotWidget,
+                  ),
                 ),
               ),
             ),
