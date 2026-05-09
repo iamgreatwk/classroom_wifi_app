@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import '../providers/app_provider.dart';
 import '../services/excel_parser_service.dart';
-import '../config.dart';
 import 'course_display_screen.dart';
 
 /// 主屏幕
@@ -158,14 +156,8 @@ class _HomeScreenState extends State<HomeScreen> {
             _buildInfoRow('星期', weekday),
             _buildInfoRow('第', '$period 节'),
             const Divider(),
-            // Web版显示教室选择器，Android版显示附近教室
-            if (AppConfig.isWebMode)
-              _buildClassroomSelector(provider)
-            else
-              _buildInfoRow(
-                '附近教室',
-                provider.nearestClassroom?.name ?? '未检测到',
-              ),
+            // Web版显示教室选择器
+            _buildClassroomSelector(provider),
           ],
         ),
       ),
@@ -317,7 +309,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ] else ...[
                 Text(
-                  AppConfig.isWebMode ? '请在上方选择教室' : '正在扫描附近教室...',
+                  '请在上方选择教室',
                   style: TextStyle(
                     fontSize: 16,
                     color: Colors.grey[600],
@@ -413,36 +405,20 @@ class _HomeScreenState extends State<HomeScreen> {
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.single;
 
-        if (kIsWeb) {
-          // Web环境：使用bytes（无path属性）
-          if (file.bytes != null) {
+        // Web环境：使用bytes（无path属性）
+        if (file.bytes != null) {
+          if (mounted) {
+            await context.read<AppProvider>().parseExcelBytes(file.bytes!, isSunday: isSunday);
             if (mounted) {
-              await context.read<AppProvider>().parseExcelBytes(file.bytes!, isSunday: isSunday);
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(isSunday ? '周日课表导入成功！' : '周一至周六课表导入成功！'),
-                  ),
-                );
-              }
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(isSunday ? '周日课表导入成功！' : '周一至周六课表导入成功！'),
+                ),
+              );
             }
-          } else {
-            throw Exception('Web环境下无法读取文件');
           }
         } else {
-          // Android/iOS环境：使用path
-          if (file.path != null) {
-            if (mounted) {
-              await context.read<AppProvider>().parseExcelFile(file.path!, isSunday: isSunday);
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(isSunday ? '周日课表导入成功！' : '周一至周六课表导入成功！'),
-                  ),
-                );
-              }
-            }
-          }
+          throw Exception('无法读取文件');
         }
       }
     } catch (e) {

@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import '../models/reminder.dart';
 import '../models/course.dart';
 import '../providers/app_provider.dart';
-import '../config.dart';
 
 /// 查看页面（导入课表 + 筛选查看教室）
 class ReminderScreen extends StatelessWidget {
@@ -172,12 +170,9 @@ class ReminderScreen extends StatelessWidget {
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.single;
 
-        if (kIsWeb && file.bytes != null) {
+        if (file.bytes != null) {
           // Web环境：使用bytes
           await _importSemesterExcelWithProgress(context, provider, file.bytes!);
-        } else if (!kIsWeb && file.path != null) {
-          // iOS/Android环境：使用path
-          await _importSemesterExcelWithProgress(context, provider, null, file.path!);
         } else {
           throw Exception('无法读取文件内容');
         }
@@ -191,12 +186,11 @@ class ReminderScreen extends StatelessWidget {
     }
   }
 
-  /// 导入学期课表（带进度）- Web用bytes，iOS/Android用path
+  /// 导入学期课表（带进度）- Web用bytes
   Future<void> _importSemesterExcelWithProgress(
     BuildContext context,
     AppProvider provider,
-    Uint8List? bytes,
-    [String? filePath]
+    Uint8List bytes,
   ) async {
     // 使用 Stream 来传递进度，支持对话框内实时更新
     final progressController = StreamController<Map<String, dynamic>>.broadcast();
@@ -257,30 +251,16 @@ class ReminderScreen extends StatelessWidget {
           }
 
           try {
-            // 根据平台选择解析方法
-            if (bytes != null) {
-              // Web：使用bytes
-              await provider.parseSemesterExcelBytesAsync(
-                bytes,
-                onProgress: (current, total, message) {
-                  progressController.add({
-                    'progress': current / total,
-                    'message': message,
-                  });
-                },
-              );
-            } else if (filePath != null) {
-              // iOS/Android：使用filePath
-              await provider.parseSemesterExcelFile(
-                filePath,
-                onProgress: (current, total, message) {
-                  progressController.add({
-                    'progress': current / total,
-                    'message': message,
-                  });
-                },
-              );
-            }
+            // Web：使用bytes
+            await provider.parseSemesterExcelBytesAsync(
+              bytes,
+              onProgress: (current, total, message) {
+                progressController.add({
+                  'progress': current / total,
+                  'message': message,
+                });
+              },
+            );
 
             await progressController.close();
 
@@ -346,13 +326,9 @@ class ReminderScreen extends StatelessWidget {
         }
 
         try {
-          // 根据平台选择解析方法
-          if (kIsWeb && file.bytes != null) {
-            // Web：使用bytes
+          // Web：使用bytes
+          if (file.bytes != null) {
             await provider.parseSemesterJsonBytes(file.bytes!);
-          } else if (!kIsWeb && file.path != null) {
-            // iOS/Android：使用filePath
-            await provider.parseSemesterJsonFile(file.path!);
           } else {
             throw Exception('无法读取文件内容');
           }
@@ -883,32 +859,18 @@ class _ImportButton extends StatelessWidget {
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.single;
 
-        if (kIsWeb) {
-          // Web环境：使用bytes
-          if (file.bytes != null) {
-            await provider.parseExcelBytes(file.bytes!, isSunday: isSunday);
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(isSunday ? '周日课表导入成功！' : '周一至周六课表导入成功！'),
-                ),
-              );
-            }
-          } else {
-            throw Exception('Web 环境下无法读取文件');
+        // Web环境：使用bytes
+        if (file.bytes != null) {
+          await provider.parseExcelBytes(file.bytes!, isSunday: isSunday);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(isSunday ? '周日课表导入成功！' : '周一至周六课表导入成功！'),
+              ),
+            );
           }
         } else {
-          // Android/iOS环境：使用path
-          if (file.path != null) {
-            await provider.parseExcelFile(file.path!, isSunday: isSunday);
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(isSunday ? '周日课表导入成功！' : '周一至周六课表导入成功！'),
-                ),
-              );
-            }
-          }
+          throw Exception('无法读取文件');
         }
       }
     } catch (e) {

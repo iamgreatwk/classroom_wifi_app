@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
 import '../models/course.dart';
 import '../models/reminder.dart';
@@ -13,12 +11,8 @@ import '../services/web_download_service.dart';
 import '../services/screenshot_service.dart';
 import 'course_display_screen.dart';
 
-// 条件导入：仅在 Web 平台导入 dart:js
+// Web 平台导入 dart:js
 import '../utils/conditional_import.dart';
-// 条件导入：dart:io, path_provider, share_plus
-import '../utils/conditional_io.dart' as conditional_io;
-import '../utils/conditional_path_provider.dart' as conditional_path;
-import '../utils/conditional_share.dart' as conditional_share;
 
 
 
@@ -593,9 +587,8 @@ class _OverviewScreenState extends State<OverviewScreen> {
     return false;
   }
 
-  /// 下载总览页面为图片（跨平台方案）
+  /// 下载总览页面为图片（Web平台）
   /// Web: 使用 JavaScript Canvas 绘制
-  /// iOS/Android: 使用 RepaintBoundary 截图
   /// [filtered] - true: 只下载有课程的教室; false: 下载所有选中教室
   Future<void> _downloadOverviewImage({bool filtered = false}) async {
     try {
@@ -605,13 +598,8 @@ class _OverviewScreenState extends State<OverviewScreen> {
         );
       }
 
-      if (kIsWeb) {
-        // Web 平台：使用 JavaScript Canvas
-        await _downloadOverviewImageWeb(filtered: filtered);
-      } else {
-        // iOS/Android：使用 RepaintBoundary 截图
-        await _downloadOverviewImageMobile(filtered: filtered);
-      }
+      // Web 平台：使用 JavaScript Canvas
+      await _downloadOverviewImageWeb(filtered: filtered);
     } catch (e) {
       debugPrint('Download error: $e');
       if (mounted) {
@@ -757,306 +745,6 @@ class _OverviewScreenState extends State<OverviewScreen> {
         const SnackBar(content: Text('截图失败，请重试')),
       );
     }
-  }
-
-  /// iOS/Android 平台：使用 RepaintBoundary 截图并保存到相册
-  /// [filtered] - true: 只下载有课程的教室; false: 下载所有选中教室
-  Future<void> _downloadOverviewImageMobile({bool filtered = false}) async {
-    final provider = context.read<AppProvider>();
-    final weekday = ExcelParserService.getWeekdayName(_selectedDate);
-
-    // 获取当前显示的教室列表
-    final pages = _getFilteredPages(provider.classrooms, provider);
-    final selectedPages = provider.selectedOverviewPages;
-    final allSelectedClassrooms = <Classroom>[];
-    for (final page in pages) {
-      if (selectedPages.contains(page.key)) {
-        allSelectedClassrooms.addAll(page.value);
-      }
-    }
-    final seen = <String>{};
-    var classroomsToCapture = allSelectedClassrooms
-        .where((c) => seen.add(c.name))
-        .toList();
-
-    // 应用教室筛选
-    if (_selectedClassrooms.isNotEmpty) {
-      classroomsToCapture = classroomsToCapture
-          .where((c) => _selectedClassrooms.contains(c.name))
-          .toList();
-    }
-
-    // 应用有课筛选
-    if (filtered) {
-      classroomsToCapture = classroomsToCapture.where((classroom) {
-        return classroom.schedule.values.any((daySchedule) {
-          return daySchedule.values.any((course) {
-            if (course.weekday != weekday) return false;
-            return _matchesCourseTypeFilter(course);
-          });
-        });
-      }).toList();
-    }
-
-    if (classroomsToCapture.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('没有符合条件的教室')),
-        );
-      }
-      return;
-    }
-
-    // 使用临时Widget截图
-    await _showMobileScreenshotPreviewWithClassrooms(
-      classroomsToCapture,
-      weekday,
-      filtered,
-    );
-  }
-
-  /// 显示移动端截图预览对话框
-  void _showMobileScreenshotPreview(Uint8List imageBytes) {
-    final weekday = ExcelParserService.getWeekdayName(DateTime.now());
-
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 标题栏
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withAlpha(26),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.image, color: Colors.grey),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '今日总览 - $weekday',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  // 分享按钮
-                  IconButton(
-                    icon: const Icon(Icons.share),
-                    tooltip: '分享图片',
-                    onPressed: () => _shareImageBytes(imageBytes, '今日总览_$weekday.png'),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.of(context).pop(),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ],
-              ),
-            ),
-            // 图片区域
-            Flexible(
-              child: Container(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height * 0.65,
-                ),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                ),
-                child: InteractiveViewer(
-                  minScale: 0.5,
-                  maxScale: 4.0,
-                  child: Image.memory(
-                    imageBytes,
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ),
-            ),
-            // 底部提示
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withAlpha(26),
-                    blurRadius: 4,
-                    offset: const Offset(0, -2),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.touch_app,
-                        size: 20,
-                        color: Colors.grey.shade600,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '长按图片保存或截图分享',
-                        style: TextStyle(
-                          color: Colors.grey.shade700,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '提示：双指可缩放图片',
-                    style: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 使用指定教室列表显示移动端截图预览
-  Future<void> _showMobileScreenshotPreviewWithClassrooms(
-    List<Classroom> classrooms,
-    String weekday,
-    bool filtered,
-  ) async {
-    final screenshotKey = GlobalKey();
-    final now = _selectedDate;
-    final absentMap = context.read<AppProvider>().absentClassrooms;
-
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 标题栏
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withAlpha(26),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.image, color: Colors.grey),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '今日总览 - $weekday${filtered ? "（有课教室）" : ""}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.of(context).pop(),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ],
-              ),
-            ),
-            // 截图区域
-            Flexible(
-              child: Container(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height * 0.65,
-                ),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                ),
-                child: SingleChildScrollView(
-                  child: RepaintBoundary(
-                    key: screenshotKey,
-                    child: _buildScreenshotWidget(classrooms, weekday, now, absentMap),
-                  ),
-                ),
-              ),
-            ),
-            // 底部按钮
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withAlpha(26),
-                    blurRadius: 4,
-                    offset: const Offset(0, -2),
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: () async {
-                      final boundary = screenshotKey.currentContext?.findRenderObject()
-                          as RenderRepaintBoundary?;
-                      if (boundary == null) return;
-
-                      final image = await boundary.toImage(pixelRatio: 2.0);
-                      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-                      if (byteData == null) return;
-
-                      final imageBytes = byteData.buffer.asUint8List();
-                      await _shareImageBytes(
-                        imageBytes,
-                        '今日总览_$weekday${filtered ? "_筛选" : ""}.png',
-                      );
-                    },
-                    icon: const Icon(Icons.share),
-                    label: const Text('分享'),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   /// 构建截图用的Widget - 参照参考图片布局
@@ -1258,55 +946,13 @@ class _OverviewScreenState extends State<OverviewScreen> {
     });
   }
 
-  /// 保存图片到相册（iOS/Android）
-  Future<void> _saveImageToGallery(Uint8List imageBytes) async {
-    try {
-      // 使用分享功能让用户保存图片
-      await _shareImageBytes(imageBytes, '今日总览截图.png');
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('截图已生成，请选择保存方式')),
-        );
-      }
-    } catch (e) {
-      debugPrint('Error saving image: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('保存失败: $e')),
-        );
-      }
-    }
-  }
-
-  /// 分享图片字节数据
+  /// 分享图片字节数据（Web平台提示使用下载按钮）
   Future<void> _shareImageBytes(Uint8List bytes, String filename) async {
     // Web 平台不支持本地文件分享
-    if (kIsWeb) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Web 平台暂不支持分享功能，请使用下载按钮保存图片')),
-        );
-      }
-      return;
-    }
-
-    // 使用条件导入分享图片（仅移动端）
-    try {
-      final tempDir = await conditional_path.getTemporaryDirectory();
-      final file = conditional_io.File('${tempDir.path}/$filename');
-      await file.writeAsBytes(bytes);
-      await conditional_share.Share.shareXFiles(
-        [conditional_share.XFile(file.path)],
-        subject: filename,
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Web 平台请使用下载按钮保存图片')),
       );
-    } catch (e) {
-      debugPrint('Share error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('分享失败: $e')),
-        );
-      }
     }
   }
   
@@ -1323,19 +969,13 @@ class _OverviewScreenState extends State<OverviewScreen> {
     }
   }
   
-  /// 使用 JavaScript Canvas 绘制并下载截图（仅 Web 平台）
+  /// 使用 JavaScript Canvas 绘制并下载截图（Web 平台）
   Future<bool> _captureWithJS(
     List<String> headers,
     List<List<String>> rows,
     List<Map<String, dynamic>> rowColors,
     String weekday,
   ) async {
-    // 仅 Web 平台支持
-    if (!kIsWeb) {
-      debugPrint('_captureWithJS is only supported on Web platform');
-      return false;
-    }
-    
     try {
       final completer = Completer<bool>();
       
@@ -1533,69 +1173,6 @@ class _OverviewScreenState extends State<OverviewScreen> {
     }
   }
   
-  /// 检测是否为 iOS Safari
-  bool _isIOSSafari() {
-    try {
-      final userAgent = js.context['navigator']['userAgent'].toString().toLowerCase();
-      final vendor = js.context['navigator']['vendor']?.toString().toLowerCase() ?? '';
-      
-      // 检测 iOS 设备（iPhone 或 iPad）
-      final isIOS = userAgent.contains('iphone') || userAgent.contains('ipad') || userAgent.contains('ipod');
-      // 检测 Safari（不是 Chrome 或其他浏览器）
-      final isSafari = vendor.contains('apple') && !userAgent.contains('crios') && !userAgent.contains('fxios');
-      
-      return isIOS || isSafari;
-    } catch (e) {
-      return false;
-    }
-  }
-  
-  /// 获取节次对应的颜色 Hex
-  String _getColorHexForPeriod(int period) {
-    final color = _getPeriodColor(period);
-    return '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
-  }
-  
-  /// 使用 RepaintBoundary 捕获 Widget 为 PNG 图片
-  Future<Uint8List?> _captureWidgetToImage() async {
-    try {
-      // 查找 RenderRepaintBoundary
-      final RenderRepaintBoundary? boundary = 
-          _screenshotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      
-      if (boundary == null) {
-        debugPrint('RenderRepaintBoundary not found - key: $_screenshotKey, context: ${_screenshotKey.currentContext}');
-        return null;
-      }
-      
-      // 确保渲染完成
-      if (!boundary.hasSize || boundary.size.isEmpty) {
-        debugPrint('Boundary has no size or is empty');
-        return null;
-      }
-      
-      debugPrint('Capturing image with size: ${boundary.size}');
-      
-      // 捕获为图片
-      final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
-      
-      // 转换为 PNG 字节
-      final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      
-      if (byteData == null) {
-        debugPrint('Failed to convert image to byte data');
-        return null;
-      }
-      
-      debugPrint('Image captured successfully, size: ${byteData.lengthInBytes} bytes');
-      return byteData.buffer.asUint8List();
-    } catch (e, stackTrace) {
-      debugPrint('Error capturing widget: $e');
-      debugPrint('Stack trace: $stackTrace');
-      return null;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
