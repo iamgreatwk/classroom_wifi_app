@@ -15,11 +15,11 @@ import 'course_display_screen.dart';
 
 // 条件导入：仅在 Web 平台导入 dart:js
 import '../utils/conditional_import.dart';
+// 条件导入：dart:io, path_provider, share_plus
+import '../utils/conditional_io.dart' as conditional_io;
+import '../utils/conditional_path_provider.dart' as conditional_path;
+import '../utils/conditional_share.dart' as conditional_share;
 
-// 条件导入：仅在非 Web 平台导入 dart:io
-import 'dart:io' if (dart.library.html) 'dart:typed_data';
-import 'package:path_provider/path_provider.dart' if (dart.library.html) 'dart:typed_data';
-import 'package:share_plus/share_plus.dart' if (dart.library.html) 'dart:typed_data';
 
 
 /// 总览页面 - 显示所有教室1-12节详细情况
@@ -1059,7 +1059,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
     );
   }
 
-  /// 构建截图用的Widget
+  /// 构建截图用的Widget - 参照参考图片布局
   Widget _buildScreenshotWidget(
     List<Classroom> classrooms,
     String weekday,
@@ -1068,48 +1068,66 @@ class _OverviewScreenState extends State<OverviewScreen> {
   ) {
     final sortedClassrooms = _getSortedClassrooms(classrooms);
 
+    // 适配老年人的大字体配置
+    const double titleFontSize = 28;      // 标题字体
+    const double headerFontSize = 16;     // 表头字体
+    const double classroomFontSize = 18;  // 教室名字体
+    const double cellHeight = 40;         // 单元格高度
+    const double classroomColWidth = 70;  // 教室列宽度
+    const double spacing = 4;             // 间距
+
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 标题
+          // 标题 - 参照图片顶部居中大字
           Text(
-            '$weekday - ${now.month}/${now.day}',
+            '$weekday总览',
             style: const TextStyle(
-              fontSize: 16,
+              fontSize: titleFontSize,
               fontWeight: FontWeight.bold,
+              color: Colors.black87,
             ),
           ),
-          const SizedBox(height: 8),
-          // 表头
+          const SizedBox(height: 16),
+          // 表头 - 参照图片：教室 + 1-12数字
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            color: Colors.grey.shade100,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(4),
+                topRight: Radius.circular(4),
+              ),
+            ),
             child: Row(
               children: [
-                const SizedBox(width: 52, child: Text('教室', textAlign: TextAlign.center)),
+                // 教室列标题
+                SizedBox(
+                  width: classroomColWidth,
+                  child: const Text(
+                    '教室',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: headerFontSize,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black54,
+                    ),
+                  ),
+                ),
+                // 1-12节数字
                 ...List.generate(12, (i) {
                   final period = i + 1;
-                  final isCurrentPeriod = period == ExcelParserService.getCurrentPeriod(now);
                   return Expanded(
                     child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                        decoration: isCurrentPeriod
-                            ? BoxDecoration(
-                                color: _currentPeriodColor,
-                                borderRadius: BorderRadius.circular(4),
-                              )
-                            : null,
-                        child: Text(
-                          '$period',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: isCurrentPeriod ? FontWeight.bold : FontWeight.normal,
-                            color: isCurrentPeriod ? Colors.white : Colors.grey.shade700,
-                          ),
+                      child: Text(
+                        '$period',
+                        style: const TextStyle(
+                          fontSize: headerFontSize,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black54,
                         ),
                       ),
                     ),
@@ -1119,28 +1137,35 @@ class _OverviewScreenState extends State<OverviewScreen> {
             ),
           ),
           // 教室列表
-          ...sortedClassrooms.map((classroom) {
+          ...sortedClassrooms.asMap().entries.map((entry) {
+            final index = entry.key;
+            final classroom = entry.value;
             final classroomNumber = classroom.name.replaceAll(RegExp(r'[^0-9]'), '');
+
             return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              height: cellHeight,
               decoration: BoxDecoration(
+                color: index % 2 == 0 ? Colors.grey.shade50 : Colors.white,
                 border: Border(
-                  bottom: BorderSide(color: Colors.grey.shade200),
+                  bottom: BorderSide(color: Colors.grey.shade300),
                 ),
               ),
               child: Row(
                 children: [
-                  SizedBox(
-                    width: 52,
+                  // 教室编号
+                  Container(
+                    width: classroomColWidth,
+                    alignment: Alignment.center,
                     child: Text(
                       classroomNumber,
                       style: const TextStyle(
-                        fontSize: 13,
+                        fontSize: classroomFontSize,
                         fontWeight: FontWeight.bold,
+                        color: Colors.black87,
                       ),
-                      textAlign: TextAlign.center,
                     ),
                   ),
+                  // 节次色块
                   ..._buildPeriodCellsForScreenshot(
                     classroom,
                     weekday,
@@ -1156,51 +1181,78 @@ class _OverviewScreenState extends State<OverviewScreen> {
     );
   }
 
-  /// 为截图构建节次单元格
+  /// 为截图构建节次单元格 - 参照参考图片样式
   List<Widget> _buildPeriodCellsForScreenshot(
     Classroom classroom,
     String weekday,
     DateTime now,
     Map<int, Set<String>> absentMap,
   ) {
-    final provider = context.read<AppProvider>();
+    // 分析课程连续块
+    final courseBlocks = _analyzeCourseBlocks(classroom, weekday);
+    final blockColors = <String, Color>{};
 
     return List.generate(12, (i) {
       final period = i + 1;
-      final hasCourse = classroom.hasCourseInPeriods(weekday, [period]);
+      final rawBlockId = courseBlocks[period];
+      final blockId = rawBlockId != null ? _getActualBlockId(rawBlockId) : null;
+      final firstPeriodOfBlock = rawBlockId != null
+          ? _getFirstPeriodOfBlock(courseBlocks, rawBlockId)
+          : period;
+
+      // 判断是否有课
+      final hasCourse = blockId != null && !blockId.startsWith('PERIOD5_INDEPENDENT_');
+
+      // 判断是否为独立第5节
+      final isIndependentPeriod5 = rawBlockId != null &&
+          rawBlockId.startsWith('PERIOD5_INDEPENDENT_');
+
+      Color cellColor;
+      if (isIndependentPeriod5) {
+        // 独立第5节使用深绿色
+        cellColor = _period5Color;
+      } else if (hasCourse && blockId != null) {
+        // 为课程块分配颜色（使用起始节次对应的颜色）
+        if (!blockColors.containsKey(blockId)) {
+          blockColors[blockId] = _getPeriodColor(firstPeriodOfBlock);
+        }
+        cellColor = blockColors[blockId]!;
+      } else {
+        // 无课使用浅灰色
+        cellColor = Colors.grey.shade300;
+      }
+
+      // 检查是否缺勤
       final reminderId = getReminderIdForPeriod(period);
       final isAbsent = hasCourse && reminderId != null &&
           absentMap[reminderId]?.contains(classroom.name) == true;
 
-      Color cellColor;
-      if (hasCourse) {
-        cellColor = _getPeriodColor(period);
-      } else {
-        cellColor = Colors.grey.shade300;
-      }
+      // 根据背景亮度决定文字颜色
+      final textColor = cellColor.computeLuminance() > 0.35
+          ? Colors.black
+          : Colors.white;
 
       return Expanded(
-        child: Container(
-          height: 24,
-          margin: const EdgeInsets.symmetric(horizontal: 1),
-          decoration: BoxDecoration(
-            color: cellColor,
-            borderRadius: BorderRadius.circular(3),
-          ),
-          child: isAbsent
-              ? Center(
-                  child: Text(
-                    '缺',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: cellColor.computeLuminance() > 0.35
-                          ? Colors.black
-                          : Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          child: Container(
+            decoration: BoxDecoration(
+              color: cellColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: isAbsent
+                ? Center(
+                    child: Text(
+                      '缺',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: textColor,
+                      ),
                     ),
-                  ),
-                )
-              : null,
+                  )
+                : null,
+          ),
         ),
       );
     });
@@ -1239,12 +1291,15 @@ class _OverviewScreenState extends State<OverviewScreen> {
       return;
     }
 
-    // 使用 share_plus 分享图片（仅移动端）
+    // 使用条件导入分享图片（仅移动端）
     try {
-      // 动态导入移动端依赖
-      final tempDir = await _getTempDir();
-      final file = await _createTempFile(tempDir.path, filename, bytes);
-      await _shareFile(file.path, filename);
+      final tempDir = await conditional_path.getTemporaryDirectory();
+      final file = conditional_io.File('${tempDir.path}/$filename');
+      await file.writeAsBytes(bytes);
+      await conditional_share.Share.shareXFiles(
+        [conditional_share.XFile(file.path)],
+        subject: filename,
+      );
     } catch (e) {
       debugPrint('Share error: $e');
       if (mounted) {
@@ -1253,26 +1308,6 @@ class _OverviewScreenState extends State<OverviewScreen> {
         );
       }
     }
-  }
-
-  /// 获取临时目录（仅移动端）
-  Future<Directory> _getTempDir() async {
-    return await getTemporaryDirectory();
-  }
-
-  /// 创建临时文件（仅移动端）
-  Future<File> _createTempFile(String dir, String filename, Uint8List bytes) async {
-    final file = File('$dir/$filename');
-    await file.writeAsBytes(bytes);
-    return file;
-  }
-
-  /// 分享文件（仅移动端）
-  Future<void> _shareFile(String path, String filename) async {
-    await Share.shareXFiles(
-      [XFile(path)],
-      subject: filename,
-    );
   }
   
   /// 获取节次组对应的节次列表

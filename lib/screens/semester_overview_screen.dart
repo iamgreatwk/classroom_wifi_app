@@ -14,11 +14,11 @@ import 'package:flutter/foundation.dart';
 import '../utils/conditional_import.dart';
 // 条件导入：platformViewRegistry
 import '../utils/conditional_platform_view.dart' as platform_view;
+// 条件导入：dart:io, path_provider, share_plus
+import '../utils/conditional_io.dart' as conditional_io;
+import '../utils/conditional_path_provider.dart' as conditional_path;
+import '../utils/conditional_share.dart' as conditional_share;
 
-// 条件导入：仅在非 Web 平台导入 dart:io
-import 'dart:io' if (dart.library.html) 'dart:typed_data';
-import 'package:path_provider/path_provider.dart' if (dart.library.html) 'dart:typed_data';
-import 'package:share_plus/share_plus.dart' if (dart.library.html) 'dart:typed_data';
 
 
 /// 学期总览页面 - 显示整学期课表，支持按周次筛选
@@ -1410,7 +1410,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   }
 
   /// iOS/Android: 使用 RepaintBoundary 截图
-  /// [filtered] - true: 只下载有课程的教室; false: 下载所有选中教室
+  /// [filtered] - true: 只下载在当前筛选类型和周次下有课程的教室; false: 下载所有选中教室（包括无课的）
   Future<void> _downloadWithRepaintBoundary({bool filtered = false}) async {
     try {
       final provider = context.read<AppProvider>();
@@ -1420,14 +1420,30 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
 
       // 获取要截图的教室列表
       List<SemesterClassroom> classroomsToCapture;
+
+      // 先获取所有分页和教室筛选后的列表
+      final allClassrooms = provider.semesterClassrooms;
+      final pageFiltered = _applyPageFilter(allClassrooms);
+      final classroomFiltered = _applyClassroomFilter(pageFiltered);
+
       if (filtered) {
-        // 只包含有当前周课程的教室
-        classroomsToCapture = _getFilteredClassroomsWithCourses();
+        // 左侧按钮：只下载在当前周和选中类型下有课程的教室
+        classroomsToCapture = classroomFiltered.where((classroom) {
+          for (int period = 1; period <= 12; period++) {
+            final courses = classroom.getCourses(currentWeekday, period);
+            for (final course in courses) {
+              if (course.hasClassInWeek(currentWeek) &&
+                  _matchesCourseTypeFilter(course) &&
+                  _matchesWeekTypeFilter(course)) {
+                return true;
+              }
+            }
+          }
+          return false;
+        }).toList();
       } else {
-        // 所有当前筛选的教室
-        final allClassrooms = provider.semesterClassrooms;
-        final pageFiltered = _applyPageFilter(allClassrooms);
-        classroomsToCapture = _applyClassroomFilter(pageFiltered);
+        // 右侧按钮：下载所有选中的教室（包括无课的）
+        classroomsToCapture = classroomFiltered;
       }
 
       if (classroomsToCapture.isEmpty) {
@@ -1455,31 +1471,6 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
         );
       }
     }
-  }
-
-  /// 获取有当前周课程的教室列表（用于筛选后下载）
-  List<SemesterClassroom> _getFilteredClassroomsWithCourses() {
-    final provider = context.read<AppProvider>();
-    final allClassrooms = provider.semesterClassrooms;
-    final baseWeek = provider.selectedWeek;
-    final currentWeekday = _weekdays[_selectedWeekday];
-    final currentWeek = _getDisplayWeek(baseWeek, _selectedWeekday);
-
-    // 应用分页筛选
-    final pageFiltered = _applyPageFilter(allClassrooms);
-
-    // 应用教室筛选
-    final classroomFiltered = _applyClassroomFilter(pageFiltered);
-
-    // 筛选出有当前周课程的教室
-    return classroomFiltered.where((classroom) {
-      final courses = classroom.getCoursesForWeekday(currentWeekday);
-      return courses.any((course) {
-        if (!_matchesCourseTypeFilter(course)) return false;
-        if (!_matchesWeekTypeFilter(course)) return false;
-        return course.hasClassInWeek(currentWeek);
-      });
-    }).toList();
   }
 
   /// 使用指定教室列表显示移动端截图预览
@@ -1631,7 +1622,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     }
   }
 
-  /// 构建截图用的Widget
+  /// 构建截图用的Widget - 参照参考图片样式（老年人友好）
   Widget _buildScreenshotWidget(
     List<SemesterClassroom> classrooms,
     String currentWeekday,
@@ -1639,45 +1630,65 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   ) {
     final sortedClassrooms = _getSortedClassrooms(classrooms);
 
+    // 适配老年人的大字体配置
+    const double titleFontSize = 28;      // 标题字体
+    const double headerFontSize = 16;     // 表头字体
+    const double classroomFontSize = 18;  // 教室名字体
+    const double cellHeight = 40;         // 单元格高度
+    const double classroomColWidth = 70;  // 教室列宽度
+
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 标题
+          // 标题 - 参照图片顶部居中大字
           Text(
-            '$currentWeekday - 第$currentWeek周',
+            '$currentWeekday总览 - 第$currentWeek周',
             style: const TextStyle(
-              fontSize: 16,
+              fontSize: titleFontSize,
               fontWeight: FontWeight.bold,
+              color: Colors.black87,
             ),
           ),
-          const SizedBox(height: 8),
-          // 表头
+          const SizedBox(height: 16),
+          // 表头 - 参照图片：教室 + 1-12数字
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            color: Colors.grey.shade100,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(4),
+                topRight: Radius.circular(4),
+              ),
+            ),
             child: Row(
               children: [
-                const SizedBox(width: 60, child: Text('教室', textAlign: TextAlign.center)),
+                // 教室列标题
+                SizedBox(
+                  width: classroomColWidth,
+                  child: const Text(
+                    '教室',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: headerFontSize,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black54,
+                    ),
+                  ),
+                ),
+                // 1-12节数字
                 ...List.generate(12, (i) {
                   final period = i + 1;
                   return Expanded(
                     child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: _getPeriodColor(period),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          '$period',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
+                      child: Text(
+                        '$period',
+                        style: const TextStyle(
+                          fontSize: headerFontSize,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black54,
                         ),
                       ),
                     ),
@@ -1687,28 +1698,35 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
             ),
           ),
           // 教室列表
-          ...sortedClassrooms.map((classroom) {
+          ...sortedClassrooms.asMap().entries.map((entry) {
+            final index = entry.key;
+            final classroom = entry.value;
             final classroomNumber = classroom.name.replaceAll(RegExp(r'[^0-9]'), '');
+
             return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              height: cellHeight,
               decoration: BoxDecoration(
+                color: index % 2 == 0 ? Colors.grey.shade50 : Colors.white,
                 border: Border(
-                  bottom: BorderSide(color: Colors.grey.shade200),
+                  bottom: BorderSide(color: Colors.grey.shade300),
                 ),
               ),
               child: Row(
                 children: [
-                  SizedBox(
-                    width: 60,
+                  // 教室编号
+                  Container(
+                    width: classroomColWidth,
+                    alignment: Alignment.center,
                     child: Text(
                       classroomNumber,
                       style: const TextStyle(
-                        fontSize: 13,
+                        fontSize: classroomFontSize,
                         fontWeight: FontWeight.bold,
+                        color: Colors.black87,
                       ),
-                      textAlign: TextAlign.center,
                     ),
                   ),
+                  // 节次色块
                   ..._buildPeriodCellsForScreenshot(
                     context,
                     classroom,
@@ -1724,7 +1742,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     );
   }
 
-  /// 为截图构建节次单元格
+  /// 为截图构建节次单元格 - 参照参考图片样式
   List<Widget> _buildPeriodCellsForScreenshot(
     BuildContext context,
     SemesterClassroom classroom,
@@ -1739,34 +1757,28 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
       final period = i + 1;
       final blockInfo = courseBlocks[period];
 
+      Color cellColor;
       if (blockInfo == null) {
-        return Expanded(
-          child: Container(
-            height: 20,
-            margin: const EdgeInsets.symmetric(horizontal: 1),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade200,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        );
-      }
+        // 无课使用浅灰色
+        cellColor = Colors.grey.shade300;
+      } else {
+        final blockId = blockInfo['blockId'] as String;
+        final firstPeriod = blockInfo['firstPeriod'] as int;
 
-      final blockId = blockInfo['blockId'] as String;
-      final firstPeriod = blockInfo['firstPeriod'] as int;
-
-      if (!blockColors.containsKey(blockId)) {
-        blockColors[blockId] = _getPeriodColor(firstPeriod);
+        if (!blockColors.containsKey(blockId)) {
+          blockColors[blockId] = _getPeriodColor(firstPeriod);
+        }
+        cellColor = blockColors[blockId]!;
       }
-      final color = blockColors[blockId]!;
 
       return Expanded(
-        child: Container(
-          height: 20,
-          margin: const EdgeInsets.symmetric(horizontal: 1),
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          child: Container(
+            decoration: BoxDecoration(
+              color: cellColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
           ),
         ),
       );
@@ -1958,12 +1970,15 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
       return;
     }
 
-    // 使用 share_plus 分享图片（仅移动端）
+    // 使用条件导入分享图片（仅移动端）
     try {
-      // 动态导入移动端依赖
-      final tempDir = await _getTempDir();
-      final file = await _createTempFile(tempDir.path, filename, bytes);
-      await _shareFile(file.path, filename);
+      final tempDir = await conditional_path.getTemporaryDirectory();
+      final file = conditional_io.File('${tempDir.path}/$filename');
+      await file.writeAsBytes(bytes);
+      await conditional_share.Share.shareXFiles(
+        [conditional_share.XFile(file.path)],
+        subject: filename,
+      );
     } catch (e) {
       debugPrint('Share error: $e');
       if (mounted) {
@@ -1972,26 +1987,6 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
         );
       }
     }
-  }
-
-  /// 获取临时目录（仅移动端）
-  Future<Directory> _getTempDir() async {
-    return await getTemporaryDirectory();
-  }
-
-  /// 创建临时文件（仅移动端）
-  Future<File> _createTempFile(String dir, String filename, Uint8List bytes) async {
-    final file = File('$dir/$filename');
-    await file.writeAsBytes(bytes);
-    return file;
-  }
-
-  /// 分享文件（仅移动端）
-  Future<void> _shareFile(String path, String filename) async {
-    await Share.shareXFiles(
-      [XFile(path)],
-      subject: filename,
-    );
   }
 
   /// 使用 Canvas 绘制图片
