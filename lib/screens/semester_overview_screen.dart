@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -32,19 +33,6 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   /// 当前显示的星期（0=周日，1=周一，...，6=周六）
   int _selectedWeekday = DateTime.now().weekday % 7;
 
-  /// 课程类型筛选
-  Set<String> _selectedCourseTypes = {'graduate', 'undergraduate', 'borrowed'};
-
-  /// 教室筛选
-  Set<String> _selectedClassrooms = {};
-
-  /// 分页筛选（2楼大、2楼小、3楼大等）
-  Set<String> _selectedPages = {'2楼大'};
-
-  /// 单周/连续周筛选
-  /// 'single' = 单周, 'continuous' = 连续周
-  Set<String> _selectedWeekTypes = {'single', 'continuous'};
-
   /// 是否显示搜索框
   bool _showSearchBox = false;
 
@@ -62,9 +50,6 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
 
   /// 是否正在截图中
   bool _isCapturing = false;
-
-  /// 是否展开筛选区域（默认折叠）
-  bool _isFilterExpanded = false;
 
   static const List<String> _weekdays = [
     '星期日',
@@ -130,6 +115,119 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     return currentWeek;
   }
 
+  /// 分析第7、8节课程并复制到粘贴板
+  /// 筛选第7、8节老师不同的课程，生成格式：
+  /// "15：40 需要优先擦黑板的教室有：xxx、xxx、xxx"
+  /// 对于7、8节老师相同、课程不同的情况，追加：
+  /// "另外，xxx、xxx教室课程变化但老师不变，按老师要求擦黑板"
+  void _copyBlackboardText(AppProvider provider) {
+    final currentWeekday = _weekdays[_selectedWeekday];
+    final baseWeek = provider.selectedWeek;
+    final currentWeek = _getDisplayWeek(baseWeek, _selectedWeekday);
+    final classrooms = provider.semesterClassrooms;
+    final selectedPages = provider.semesterSelectedPages;
+    final selectedClassrooms = provider.semesterSelectedClassrooms;
+
+    // 筛选有第7、8节课程的教室
+    final teacherDifferentClassrooms = <String>[]; // 老师不同的教室
+    final courseDifferentClassrooms = <String>[];  // 课程不同但老师相同的教室
+
+    for (final classroom in classrooms) {
+      // 应用分页筛选
+      final isInSelectedPage = selectedPages.any(
+        (page) => _isClassroomInPage(classroom.name, page),
+      );
+      if (!isInSelectedPage) continue;
+
+      // 应用教室筛选
+      if (selectedClassrooms.isNotEmpty &&
+          !selectedClassrooms.contains(classroom.name)) {
+        continue;
+      }
+
+      // 获取第7、8节的课程（考虑当前周次）
+      final period7Courses = classroom.getCourses(currentWeekday, 7);
+      final period8Courses = classroom.getCourses(currentWeekday, 8);
+
+      // 找出在当前周有效的课程
+      CourseWithWeek? activePeriod7Course;
+      CourseWithWeek? activePeriod8Course;
+
+      for (final course in period7Courses) {
+        if (course.hasClassInWeek(currentWeek) &&
+            _matchesCourseTypeFilter(course, provider) &&
+            _matchesWeekTypeFilter(course, provider)) {
+          activePeriod7Course = course;
+          break;
+        }
+      }
+
+      for (final course in period8Courses) {
+        if (course.hasClassInWeek(currentWeek) &&
+            _matchesCourseTypeFilter(course, provider) &&
+            _matchesWeekTypeFilter(course, provider)) {
+          activePeriod8Course = course;
+          break;
+        }
+      }
+
+      // 两个节次都有课才进行比较
+      if (activePeriod7Course != null && activePeriod8Course != null) {
+        final teacher7 = activePeriod7Course.teacher ?? '';
+        final teacher8 = activePeriod8Course.teacher ?? '';
+        final course7 = activePeriod7Course.name;
+        final course8 = activePeriod8Course.name;
+
+        // 老师不同
+        if (teacher7 != teacher8) {
+          final classroomNumber = classroom.name.replaceAll(RegExp(r'[^0-9]'), '');
+          teacherDifferentClassrooms.add(classroomNumber);
+        }
+        // 老师相同但课程不同
+        else if (teacher7 == teacher8 && course7 != course8) {
+          final classroomNumber = classroom.name.replaceAll(RegExp(r'[^0-9]'), '');
+          courseDifferentClassrooms.add(classroomNumber);
+        }
+      }
+    }
+
+    // 生成文本
+    final buffer = StringBuffer();
+
+    if (teacherDifferentClassrooms.isNotEmpty) {
+      buffer.write('15：40 需要优先擦黑板的教室有：');
+      buffer.write(teacherDifferentClassrooms.join('、'));
+      buffer.write('。');
+    }
+
+    if (courseDifferentClassrooms.isNotEmpty) {
+      if (buffer.isNotEmpty) {
+        buffer.write('\n');
+      }
+      buffer.write('另外，');
+      buffer.write(courseDifferentClassrooms.join('、'));
+      buffer.write('教室课程变化但老师不变，按老师要求擦黑板。');
+    }
+
+    if (buffer.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('没有第7、8节老师不同或课程变化的教室')),
+        );
+      }
+      return;
+    }
+
+    // 复制到粘贴板
+    Clipboard.setData(ClipboardData(text: buffer.toString()));
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已复制到粘贴板')),
+      );
+    }
+  }
+
   /// 获取节次对应的固定颜色
   Color _getPeriodColor(int period) {
     if (period >= 1 && period <= 4) {
@@ -190,68 +288,46 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   }
 
   /// 判断课程是否匹配当前筛选条件
-  bool _matchesCourseTypeFilter(CourseWithWeek course) {
-    if (_selectedCourseTypes.isEmpty) return true;
+  bool _matchesCourseTypeFilter(CourseWithWeek course, AppProvider provider) {
+    final selectedCourseTypes = provider.semesterCourseTypes;
+    if (selectedCourseTypes.isEmpty) return true;
 
     final isGraduate = _isGraduateCourse(course);
     final isBorrowed = _isBorrowedCourse(course);
     final isUndergraduate = !isBorrowed && !isGraduate;
 
-    if (_selectedCourseTypes.contains('graduate') && isGraduate) return true;
-    if (_selectedCourseTypes.contains('undergraduate') && isUndergraduate)
+    if (selectedCourseTypes.contains('graduate') && isGraduate) return true;
+    if (selectedCourseTypes.contains('undergraduate') && isUndergraduate)
       return true;
-    if (_selectedCourseTypes.contains('borrowed') && isBorrowed) return true;
+    if (selectedCourseTypes.contains('borrowed') && isBorrowed) return true;
 
     return false;
   }
 
   /// 判断课程是否匹配周次类型筛选
-  bool _matchesWeekTypeFilter(CourseWithWeek course) {
-    if (_selectedWeekTypes.isEmpty) return true;
-    if (_selectedWeekTypes.length == 2) return true;
-    if (_selectedWeekTypes.contains('single') && course.isSingleWeek) return true;
-    if (_selectedWeekTypes.contains('continuous') && !course.isSingleWeek)
+  bool _matchesWeekTypeFilter(CourseWithWeek course, AppProvider provider) {
+    final selectedWeekTypes = provider.semesterSelectedWeekTypes;
+    if (selectedWeekTypes.isEmpty) return true;
+    if (selectedWeekTypes.length == 2) return true;
+    if (selectedWeekTypes.contains('single') && course.isSingleWeek) return true;
+    if (selectedWeekTypes.contains('continuous') && !course.isSingleWeek)
       return true;
     return false;
   }
 
-  /// 切换课程类型筛选
-  void _toggleCourseType(String type) {
-    setState(() {
-      if (_selectedCourseTypes.contains(type)) {
-        if (_selectedCourseTypes.length > 1) {
-          _selectedCourseTypes.remove(type);
-        }
-      } else {
-        _selectedCourseTypes.add(type);
-      }
-    });
+  /// 切换课程类型筛选（使用 Provider）
+  void _toggleCourseType(String type, AppProvider provider) {
+    provider.toggleSemesterCourseType(type);
   }
 
-  /// 切换分页筛选
-  void _togglePage(String pageName) {
-    setState(() {
-      if (_selectedPages.contains(pageName)) {
-        if (_selectedPages.length > 1) {
-          _selectedPages.remove(pageName);
-        }
-      } else {
-        _selectedPages.add(pageName);
-      }
-    });
+  /// 切换分页筛选（使用 Provider）
+  void _togglePage(String pageName, AppProvider provider) {
+    provider.toggleSemesterPage(pageName);
   }
 
-  /// 切换周次类型筛选
-  void _toggleWeekType(String type) {
-    setState(() {
-      if (_selectedWeekTypes.contains(type)) {
-        if (_selectedWeekTypes.length > 1) {
-          _selectedWeekTypes.remove(type);
-        }
-      } else {
-        _selectedWeekTypes.add(type);
-      }
-    });
+  /// 切换周次类型筛选（使用 Provider）
+  void _toggleWeekType(String type, AppProvider provider) {
+    provider.toggleSemesterWeekType(type);
   }
 
   /// 获取按数字排序后的教室列表
@@ -269,20 +345,22 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
 
   /// 应用分页筛选
   List<SemesterClassroom> _applyPageFilter(
-      List<SemesterClassroom> classrooms) {
-    if (_selectedPages.isEmpty) return classrooms;
+      List<SemesterClassroom> classrooms, AppProvider provider) {
+    final selectedPages = provider.semesterSelectedPages;
+    if (selectedPages.isEmpty) return classrooms;
     return classrooms.where((c) {
-      return _selectedPages.any((page) => _isClassroomInPage(c.name, page));
+      return selectedPages.any((page) => _isClassroomInPage(c.name, page));
     }).toList();
   }
 
   /// 应用教室筛选
   List<SemesterClassroom> _applyClassroomFilter(
-      List<SemesterClassroom> classrooms) {
-    if (_selectedClassrooms.isEmpty) {
+      List<SemesterClassroom> classrooms, AppProvider provider) {
+    final selectedClassrooms = provider.semesterSelectedClassrooms;
+    if (selectedClassrooms.isEmpty) {
       return classrooms;
     }
-    return classrooms.where((c) => _selectedClassrooms.contains(c.name)).toList();
+    return classrooms.where((c) => selectedClassrooms.contains(c.name)).toList();
   }
 
   /// 筛选：只保留在当前周和选中类型下有课的教室
@@ -290,14 +368,15 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     List<SemesterClassroom> classrooms,
     int currentWeek,
     String weekday,
+    AppProvider provider,
   ) {
     return classrooms.where((classroom) {
       for (int period = 1; period <= 12; period++) {
         final courses = classroom.getCourses(weekday, period);
         for (final course in courses) {
           if (course.hasClassInWeek(currentWeek) &&
-              _matchesCourseTypeFilter(course) &&
-              _matchesWeekTypeFilter(course)) {
+              _matchesCourseTypeFilter(course, provider) &&
+              _matchesWeekTypeFilter(course, provider)) {
             return true;
           }
         }
@@ -310,13 +389,14 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   List<SemesterClassroom> _filterClassroomsByCourseType(
     List<SemesterClassroom> classrooms,
     String weekday,
+    AppProvider provider,
   ) {
     return classrooms.where((classroom) {
       for (int period = 1; period <= 12; period++) {
         final courses = classroom.getCourses(weekday, period);
         for (final course in courses) {
-          if (_matchesCourseTypeFilter(course) &&
-              _matchesWeekTypeFilter(course)) {
+          if (_matchesCourseTypeFilter(course, provider) &&
+              _matchesWeekTypeFilter(course, provider)) {
             return true;
           }
         }
@@ -326,8 +406,8 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   }
 
   /// 显示教室筛选对话框
-  void _showClassroomFilterDialog(List<SemesterClassroom> allClassrooms) {
-    final tempSelected = Set<String>.from(_selectedClassrooms);
+  void _showClassroomFilterDialog(List<SemesterClassroom> allClassrooms, AppProvider provider) {
+    final tempSelected = Set<String>.from(provider.semesterSelectedClassrooms);
     if (tempSelected.isEmpty) {
       for (final c in allClassrooms) {
         tempSelected.add(c.name);
@@ -398,9 +478,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
                 ),
                 FilledButton(
                   onPressed: () {
-                    setState(() {
-                      _selectedClassrooms = tempSelected;
-                    });
+                    provider.setSemesterSelectedClassrooms(tempSelected);
                     Navigator.of(context).pop();
                   },
                   child: const Text('确定'),
@@ -418,6 +496,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     SemesterClassroom classroom,
     String weekday,
     int currentWeek,
+    AppProvider provider,
   ) {
     final blocks = <int, Map<String, dynamic>>{};
     String? currentBlockId;
@@ -429,8 +508,8 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
       CourseWithWeek? activeCourse;
       for (final course in courses) {
         if (course.hasClassInWeek(currentWeek) &&
-            _matchesCourseTypeFilter(course) &&
-            _matchesWeekTypeFilter(course)) {
+            _matchesCourseTypeFilter(course, provider) &&
+            _matchesWeekTypeFilter(course, provider)) {
           activeCourse = course;
           break;
         }
@@ -474,20 +553,22 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     // 获取当前选中的周次
     final provider = context.read<AppProvider>();
     final selectedWeek = provider.selectedWeek;
+    final selectedPages = provider.semesterSelectedPages;
+    final selectedClassrooms = provider.semesterSelectedClassrooms;
 
     // 遍历所有星期和周次进行搜索
     for (int week = 1; week <= 18; week++) {
       for (final day in _weekdays) {
         for (final classroom in classrooms) {
           // 筛选：检查教室是否在选中的分页中
-          final isInSelectedPage = _selectedPages.any(
+          final isInSelectedPage = selectedPages.any(
             (page) => _isClassroomInPage(classroom.name, page),
           );
           if (!isInSelectedPage) continue;
 
           // 筛选：检查教室是否在勾选的教室列表中
-          if (_selectedClassrooms.isNotEmpty &&
-              !_selectedClassrooms.contains(classroom.name)) {
+          if (selectedClassrooms.isNotEmpty &&
+              !selectedClassrooms.contains(classroom.name)) {
             continue;
           }
 
@@ -495,8 +576,8 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
             final courses = classroom.getCourses(day, period);
             for (final course in courses) {
               if (!course.hasClassInWeek(week)) continue;
-              if (!_matchesCourseTypeFilter(course)) continue;
-              if (!_matchesWeekTypeFilter(course)) continue;
+              if (!_matchesCourseTypeFilter(course, provider)) continue;
+              if (!_matchesWeekTypeFilter(course, provider)) continue;
 
               // 搜索课程名
               if (course.name.toLowerCase().contains(lowerQuery)) {
@@ -617,18 +698,20 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     // 获取教室数据
     final provider = context.read<AppProvider>();
     final classrooms = provider.semesterClassrooms;
+    final selectedPages = provider.semesterSelectedPages;
+    final selectedClassrooms = provider.semesterSelectedClassrooms;
 
     // 遍历所有数据汇总（不筛选周数，显示整个学期）
     for (int week = 1; week <= 18; week++) {
       for (final day in _weekdays) {
         for (final classroom in classrooms) {
           // 应用筛选条件（分页、教室、课程类型、周次类型）
-          final isInSelectedPage = _selectedPages.any(
+          final isInSelectedPage = selectedPages.any(
             (page) => _isClassroomInPage(classroom.name, page),
           );
           if (!isInSelectedPage) continue;
-          if (_selectedClassrooms.isNotEmpty &&
-              !_selectedClassrooms.contains(classroom.name)) {
+          if (selectedClassrooms.isNotEmpty &&
+              !selectedClassrooms.contains(classroom.name)) {
             continue;
           }
 
@@ -636,8 +719,8 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
             final courses = classroom.getCourses(day, period);
             for (final course in courses) {
               // 汇总不筛选周数，显示整个学期的课程
-              if (!_matchesCourseTypeFilter(course)) continue;
-              if (!_matchesWeekTypeFilter(course)) continue;
+              if (!_matchesCourseTypeFilter(course, provider)) continue;
+              if (!_matchesWeekTypeFilter(course, provider)) continue;
 
               // 精确匹配课程名或老师名（非模糊匹配）
               final matchesCourse = course.name.toLowerCase() == lowerQuery;
@@ -915,14 +998,15 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     int currentWeek,
   ) {
     final List<Widget> periodCards = [];
+    final provider = context.read<AppProvider>();
 
     for (int period = 1; period <= 12; period++) {
       final courses = classroom.getCourses(weekday, period);
       CourseWithWeek? activeCourse;
       for (final course in courses) {
         if (course.hasClassInWeek(currentWeek) &&
-            _matchesCourseTypeFilter(course) &&
-            _matchesWeekTypeFilter(course)) {
+            _matchesCourseTypeFilter(course, provider) &&
+            _matchesWeekTypeFilter(course, provider)) {
           activeCourse = course;
           break;
         }
@@ -1254,9 +1338,10 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     int currentWeek,
   ) {
     final allPeriods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    final courseBlocks = _analyzeCourseBlocks(classroom, weekday, currentWeek);
+    final provider = context.read<AppProvider>();
+    final courseBlocks = _analyzeCourseBlocks(classroom, weekday, currentWeek, provider);
     final lastWeekCourseBlocks = currentWeek > 1
-        ? _analyzeCourseBlocks(classroom, weekday, currentWeek - 1)
+        ? _analyzeCourseBlocks(classroom, weekday, currentWeek - 1, provider)
         : <int, Map<String, dynamic>>{};
     final blockColors = <String, Color>{};
 
@@ -1411,8 +1496,8 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
 
       // 先获取所有分页和教室筛选后的列表
       final allClassrooms = provider.semesterClassrooms;
-      final pageFiltered = _applyPageFilter(allClassrooms);
-      final classroomFiltered = _applyClassroomFilter(pageFiltered);
+      final pageFiltered = _applyPageFilter(allClassrooms, provider);
+      final classroomFiltered = _applyClassroomFilter(pageFiltered, provider);
 
       if (filtered) {
         // 左侧按钮：只下载在当前周和选中类型下有课程的教室
@@ -1421,8 +1506,8 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
             final courses = classroom.getCourses(currentWeekday, period);
             for (final course in courses) {
               if (course.hasClassInWeek(currentWeek) &&
-                  _matchesCourseTypeFilter(course) &&
-                  _matchesWeekTypeFilter(course)) {
+                  _matchesCourseTypeFilter(course, provider) &&
+                  _matchesWeekTypeFilter(course, provider)) {
                 return true;
               }
             }
@@ -1742,7 +1827,8 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     int currentWeek,
   ) {
     // 分析课程块，确保同一连续课程使用相同颜色
-    final courseBlocks = _analyzeCourseBlocks(classroom, weekday, currentWeek);
+    final provider = context.read<AppProvider>();
+    final courseBlocks = _analyzeCourseBlocks(classroom, weekday, currentWeek, provider);
     final blockColors = <String, Color>{};
 
     return List.generate(12, (i) {
@@ -2012,6 +2098,12 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
             tooltip: '汇总课程/老师',
             onPressed: _showSummaryDialog,
           ),
+          // 复制黑板提示按钮
+          IconButton(
+            icon: const Icon(Icons.content_copy),
+            tooltip: '复制7、8节黑板提示',
+            onPressed: () => _copyBlackboardText(context.read<AppProvider>()),
+          ),
           // 周次选择器
           Consumer<AppProvider>(
             builder: (context, provider, _) {
@@ -2077,23 +2169,16 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
           // 获取有数据的分页列表
           final availablePages = _getAvailablePages(allClassrooms);
 
-          // 如果当前选中的分页不在可用列表中，重置为默认值
+          // 如果当前选中的分页不在可用列表中，重置为默认值（使用 Provider 方法）
           if (availablePages.isNotEmpty) {
-            final validSelections = _selectedPages.where((p) => availablePages.contains(p)).toSet();
-            if (validSelections.isEmpty) {
-              // 如果没有有效的选中分页，默认选中第一个可用分页
-              _selectedPages = {availablePages.first};
-            } else if (validSelections.length != _selectedPages.length) {
-              // 如果有些选中的分页已不可用，更新为有效的分页
-              _selectedPages = validSelections;
-            }
+            provider.resetSemesterPages(availablePages);
           }
 
           // 应用分页筛选
-          final pageFilteredClassrooms = _applyPageFilter(allClassrooms);
+          final pageFilteredClassrooms = _applyPageFilter(allClassrooms, provider);
 
           // 应用教室筛选（不再筛选掉没有当前周课程的教室，让下载按钮能显示正确的教室）
-          final displayClassrooms = _applyClassroomFilter(pageFilteredClassrooms);
+          final displayClassrooms = _applyClassroomFilter(pageFilteredClassrooms, provider);
 
           // 排序
           final sortedClassrooms = _getSortedClassrooms(displayClassrooms);
@@ -2229,18 +2314,18 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
                   children: [
                     // 筛选栏标题 + 折叠按钮
                     InkWell(
-                      onTap: () => setState(() => _isFilterExpanded = !_isFilterExpanded),
+                      onTap: () => provider.toggleSemesterFilterExpanded(),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            _isFilterExpanded ? Icons.expand_less : Icons.expand_more,
+                            provider.isSemesterFilterExpanded ? Icons.expand_less : Icons.expand_more,
                             size: 20,
                             color: Colors.grey.shade600,
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            _isFilterExpanded ? '收起筛选' : '展开筛选',
+                            provider.isSemesterFilterExpanded ? '收起筛选' : '展开筛选',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey.shade600,
@@ -2248,7 +2333,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
                           ),
                           const SizedBox(width: 4),
                           // 显示当前筛选状态摘要
-                          if (!_isFilterExpanded) ...[
+                          if (!provider.isSemesterFilterExpanded) ...[
                             const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -2257,7 +2342,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
-                                '${_selectedPages.length}个分页',
+                                '${provider.semesterSelectedPages.length}个分页',
                                 style: const TextStyle(fontSize: 11),
                               ),
                             ),
@@ -2269,7 +2354,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
-                                '${_selectedCourseTypes.length}种类型',
+                                '${provider.semesterCourseTypes.length}种类型',
                                 style: const TextStyle(fontSize: 11),
                               ),
                             ),
@@ -2278,7 +2363,7 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
                       ),
                     ),
                     // 展开的筛选内容
-                    if (_isFilterExpanded) ...[
+                    if (provider.isSemesterFilterExpanded) ...[
                       const SizedBox(height: 8),
                       // 第一行：分页筛选（只显示有数据的分页）
                       Wrap(
@@ -2287,8 +2372,8 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
                         children: availablePages.map((pageName) {
                           return FilterChip(
                             label: Text(pageName),
-                            selected: _selectedPages.contains(pageName),
-                            onSelected: (_) => _togglePage(pageName),
+                            selected: provider.semesterSelectedPages.contains(pageName),
+                            onSelected: (_) => _togglePage(pageName, provider),
                             selectedColor: Colors.purple.shade100,
                           );
                         }).toList(),
@@ -2301,44 +2386,44 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
                         children: [
                           FilterChip(
                             label: const Text('研究生'),
-                            selected: _selectedCourseTypes.contains('graduate'),
-                            onSelected: (_) => _toggleCourseType('graduate'),
+                            selected: provider.semesterCourseTypes.contains('graduate'),
+                            onSelected: (_) => _toggleCourseType('graduate', provider),
                             selectedColor: Colors.blue.shade100,
                           ),
                           FilterChip(
                             label: const Text('本科'),
                             selected:
-                                _selectedCourseTypes.contains('undergraduate'),
-                            onSelected: (_) => _toggleCourseType('undergraduate'),
+                                provider.semesterCourseTypes.contains('undergraduate'),
+                            onSelected: (_) => _toggleCourseType('undergraduate', provider),
                             selectedColor: Colors.green.shade100,
                           ),
                           FilterChip(
                             label: const Text('借用'),
-                            selected: _selectedCourseTypes.contains('borrowed'),
-                            onSelected: (_) => _toggleCourseType('borrowed'),
+                            selected: provider.semesterCourseTypes.contains('borrowed'),
+                            onSelected: (_) => _toggleCourseType('borrowed', provider),
                             selectedColor: Colors.orange.shade100,
                           ),
                           FilterChip(
                             label: const Text('单周'),
-                            selected: _selectedWeekTypes.contains('single'),
-                            onSelected: (_) => _toggleWeekType('single'),
+                            selected: provider.semesterSelectedWeekTypes.contains('single'),
+                            onSelected: (_) => _toggleWeekType('single', provider),
                             selectedColor: Colors.red.shade100,
                           ),
                           FilterChip(
                             label: const Text('连续周'),
-                            selected: _selectedWeekTypes.contains('continuous'),
-                            onSelected: (_) => _toggleWeekType('continuous'),
+                            selected: provider.semesterSelectedWeekTypes.contains('continuous'),
+                            onSelected: (_) => _toggleWeekType('continuous', provider),
                             selectedColor: Colors.teal.shade100,
                           ),
                           ActionChip(
                             label: Text(
-                              _selectedClassrooms.isEmpty
+                              provider.semesterSelectedClassrooms.isEmpty
                                   ? '教室'
-                                  : '教室(${_selectedClassrooms.length})',
+                                  : '教室(${provider.semesterSelectedClassrooms.length})',
                             ),
                             avatar: const Icon(Icons.meeting_room, size: 18),
                             onPressed: () =>
-                                _showClassroomFilterDialog(allClassrooms),
+                                _showClassroomFilterDialog(allClassrooms, provider),
                           ),
                         ],
                       ),

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -36,15 +37,6 @@ class _OverviewScreenState extends State<OverviewScreen> {
 
   /// GlobalKey for capturing the overview widget
   final GlobalKey _screenshotKey = GlobalKey();
-
-  /// 课程类型筛选（本科/研究生/借用）
-  Set<String> _selectedCourseTypes = {'undergraduate', 'graduate', 'borrowed'};
-
-  /// 教室多选筛选
-  Set<String> _selectedClassrooms = {};
-
-  /// 是否展开筛选区域（默认折叠）
-  bool _isFilterExpanded = false;
 
   /// 当前显示的日期（默认为今天，但可以通过前一天/后一天切换）
   DateTime _selectedDate = DateTime.now();
@@ -125,38 +117,31 @@ class _OverviewScreenState extends State<OverviewScreen> {
     });
   }
 
-  /// 切换课程类型筛选
-  void _toggleCourseType(String type) {
-    setState(() {
-      if (_selectedCourseTypes.contains(type)) {
-        if (_selectedCourseTypes.length > 1) {
-          _selectedCourseTypes.remove(type);
-        }
-      } else {
-        _selectedCourseTypes.add(type);
-      }
-    });
+  /// 切换课程类型筛选（使用 Provider）
+  void _toggleCourseType(String type, AppProvider provider) {
+    provider.toggleOverviewCourseType(type);
   }
 
   /// 判断课程是否匹配当前筛选条件
-  bool _matchesCourseTypeFilter(Course course) {
-    if (_selectedCourseTypes.isEmpty) return true;
+  bool _matchesCourseTypeFilter(Course course, AppProvider provider) {
+    final selectedCourseTypes = provider.overviewCourseTypes;
+    if (selectedCourseTypes.isEmpty) return true;
 
     final rawText = course.rawText ?? course.name;
     final isGraduate = rawText.startsWith('(研)') || rawText.startsWith('◇');
     final isBorrowed = rawText.startsWith('借用');
     final isUndergraduate = !isBorrowed && !isGraduate;
 
-    if (_selectedCourseTypes.contains('graduate') && isGraduate) return true;
-    if (_selectedCourseTypes.contains('undergraduate') && isUndergraduate) return true;
-    if (_selectedCourseTypes.contains('borrowed') && isBorrowed) return true;
+    if (selectedCourseTypes.contains('graduate') && isGraduate) return true;
+    if (selectedCourseTypes.contains('undergraduate') && isUndergraduate) return true;
+    if (selectedCourseTypes.contains('borrowed') && isBorrowed) return true;
 
     return false;
   }
 
   /// 显示教室筛选对话框
-  void _showClassroomFilterDialog(List<Classroom> allClassrooms) {
-    final tempSelected = Set<String>.from(_selectedClassrooms);
+  void _showClassroomFilterDialog(List<Classroom> allClassrooms, AppProvider provider) {
+    final tempSelected = Set<String>.from(provider.overviewSelectedClassrooms);
     if (tempSelected.isEmpty) {
       for (final c in allClassrooms) {
         tempSelected.add(c.name);
@@ -227,9 +212,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
                 ),
                 FilledButton(
                   onPressed: () {
-                    setState(() {
-                      _selectedClassrooms = tempSelected;
-                    });
+                    provider.setOverviewSelectedClassrooms(tempSelected);
                     Navigator.of(context).pop();
                   },
                   child: const Text('确定'),
@@ -631,9 +614,10 @@ class _OverviewScreenState extends State<OverviewScreen> {
         .toList();
 
     // 应用教室筛选
-    if (_selectedClassrooms.isNotEmpty) {
+    final selectedClassrooms = provider.overviewSelectedClassrooms;
+    if (selectedClassrooms.isNotEmpty) {
       classroomsToCapture = classroomsToCapture
-          .where((c) => _selectedClassrooms.contains(c.name))
+          .where((c) => selectedClassrooms.contains(c.name))
           .toList();
     }
 
@@ -643,7 +627,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
         return classroom.schedule.values.any((daySchedule) {
           return daySchedule.values.any((course) {
             if (course.weekday != weekday) return false;
-            return _matchesCourseTypeFilter(course);
+            return _matchesCourseTypeFilter(course, provider);
           });
         });
       }).toList();
@@ -1148,6 +1132,80 @@ class _OverviewScreenState extends State<OverviewScreen> {
       }
     }
   }
+
+  /// 分析第7、8节课程并复制到粘贴板
+  /// 筛选第7、8节老师不同的课程，生成格式：
+  /// "15：40 需要优先擦黑板的教室有：xxx、xxx、xxx"
+  /// 对于7、8节老师相同、课程不同的情况，追加：
+  /// "另外，xxx、xxx教室课程变化但老师不变，按老师要求擦黑板"
+  void _copyBlackboardText(AppProvider provider) {
+    final weekday = ExcelParserService.getWeekdayName(_selectedDate);
+    final classrooms = provider.classrooms;
+
+    // 筛选有第7、8节课程的教室
+    final teacherDifferentClassrooms = <String>[]; // 老师不同的教室
+    final courseDifferentClassrooms = <String>[];  // 课程不同但老师相同的教室
+
+    for (final classroom in classrooms) {
+      final period7Course = classroom.getCourseAtPeriod(weekday, 7);
+      final period8Course = classroom.getCourseAtPeriod(weekday, 8);
+
+      // 两个节次都有课才进行比较
+      if (period7Course != null && period8Course != null) {
+        final teacher7 = period7Course.teacher ?? '';
+        final teacher8 = period8Course.teacher ?? '';
+        final course7 = period7Course.name;
+        final course8 = period8Course.name;
+
+        // 老师不同
+        if (teacher7 != teacher8) {
+          final classroomNumber = classroom.name.replaceAll(RegExp(r'[^0-9]'), '');
+          teacherDifferentClassrooms.add(classroomNumber);
+        }
+        // 老师相同但课程不同
+        else if (teacher7 == teacher8 && course7 != course8) {
+          final classroomNumber = classroom.name.replaceAll(RegExp(r'[^0-9]'), '');
+          courseDifferentClassrooms.add(classroomNumber);
+        }
+      }
+    }
+
+    // 生成文本
+    final buffer = StringBuffer();
+
+    if (teacherDifferentClassrooms.isNotEmpty) {
+      buffer.write('15：40 需要优先擦黑板的教室有：');
+      buffer.write(teacherDifferentClassrooms.join('、'));
+      buffer.write('。');
+    }
+
+    if (courseDifferentClassrooms.isNotEmpty) {
+      if (buffer.isNotEmpty) {
+        buffer.write('\n');
+      }
+      buffer.write('另外，');
+      buffer.write(courseDifferentClassrooms.join('、'));
+      buffer.write('教室课程变化但老师不变，按老师要求擦黑板。');
+    }
+
+    if (buffer.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('没有第7、8节老师不同或课程变化的教室')),
+        );
+      }
+      return;
+    }
+
+    // 复制到粘贴板
+    Clipboard.setData(ClipboardData(text: buffer.toString()));
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已复制到粘贴板')),
+      );
+    }
+  }
   
   /// 获取节次组对应的节次列表
   List<int> _getPeriodsForGroup(int group) {
@@ -1191,6 +1249,12 @@ class _OverviewScreenState extends State<OverviewScreen> {
                 }
               });
             },
+          ),
+          // 复制黑板提示按钮
+          IconButton(
+            icon: const Icon(Icons.content_copy),
+            tooltip: '复制7、8节黑板提示',
+            onPressed: () => _copyBlackboardText(context.read<AppProvider>()),
           ),
           // 前一天按钮
           IconButton(
@@ -1254,9 +1318,10 @@ class _OverviewScreenState extends State<OverviewScreen> {
               .toList();
 
           // 应用教室筛选
-          if (_selectedClassrooms.isNotEmpty) {
+          final selectedClassrooms = provider.overviewSelectedClassrooms;
+          if (selectedClassrooms.isNotEmpty) {
             currentPageClassrooms = currentPageClassrooms
-                .where((c) => _selectedClassrooms.contains(c.name))
+                .where((c) => selectedClassrooms.contains(c.name))
                 .toList();
           }
 
@@ -1369,18 +1434,18 @@ class _OverviewScreenState extends State<OverviewScreen> {
                     const SizedBox(height: 4),
                     // 筛选栏标题 + 展开/收起按钮
                     InkWell(
-                      onTap: () => setState(() => _isFilterExpanded = !_isFilterExpanded),
+                      onTap: () => provider.toggleOverviewFilterExpanded(),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            _isFilterExpanded ? Icons.expand_less : Icons.expand_more,
+                            provider.isOverviewFilterExpanded ? Icons.expand_less : Icons.expand_more,
                             size: 20,
                             color: Colors.grey.shade600,
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            _isFilterExpanded ? '收起筛选' : '展开筛选',
+                            provider.isOverviewFilterExpanded ? '收起筛选' : '展开筛选',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey.shade600,
@@ -1388,7 +1453,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
                           ),
                           const SizedBox(width: 4),
                           // 显示当前筛选状态摘要
-                          if (!_isFilterExpanded) ...[
+                          if (!provider.isOverviewFilterExpanded) ...[
                             const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -1409,7 +1474,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
-                                '${_selectedCourseTypes.length}种类型',
+                                '${provider.overviewCourseTypes.length}种类型',
                                 style: const TextStyle(fontSize: 11),
                               ),
                             ),
@@ -1421,7 +1486,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
-                                _selectedClassrooms.isEmpty ? '全部教室' : '${_selectedClassrooms.length}个教室',
+                                provider.overviewSelectedClassrooms.isEmpty ? '全部教室' : '${provider.overviewSelectedClassrooms.length}个教室',
                                 style: const TextStyle(fontSize: 11),
                               ),
                             ),
@@ -1430,7 +1495,7 @@ class _OverviewScreenState extends State<OverviewScreen> {
                       ),
                     ),
                     // 展开的筛选内容
-                    if (_isFilterExpanded) ...[
+                    if (provider.isOverviewFilterExpanded) ...[
                       const SizedBox(height: 8),
                       // 分页标签（多选）
                       Wrap(
@@ -1464,37 +1529,37 @@ class _OverviewScreenState extends State<OverviewScreen> {
                         children: [
                           FilterChip(
                             label: const Text('研究生', style: TextStyle(fontSize: 11)),
-                            selected: _selectedCourseTypes.contains('graduate'),
-                            onSelected: (_) => _toggleCourseType('graduate'),
+                            selected: provider.overviewCourseTypes.contains('graduate'),
+                            onSelected: (_) => _toggleCourseType('graduate', provider),
                             selectedColor: Colors.blue.shade100,
                             padding: EdgeInsets.zero,
                             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                           FilterChip(
                             label: const Text('本科', style: TextStyle(fontSize: 11)),
-                            selected: _selectedCourseTypes.contains('undergraduate'),
-                            onSelected: (_) => _toggleCourseType('undergraduate'),
+                            selected: provider.overviewCourseTypes.contains('undergraduate'),
+                            onSelected: (_) => _toggleCourseType('undergraduate', provider),
                             selectedColor: Colors.green.shade100,
                             padding: EdgeInsets.zero,
                             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                           FilterChip(
                             label: const Text('借用', style: TextStyle(fontSize: 11)),
-                            selected: _selectedCourseTypes.contains('borrowed'),
-                            onSelected: (_) => _toggleCourseType('borrowed'),
+                            selected: provider.overviewCourseTypes.contains('borrowed'),
+                            onSelected: (_) => _toggleCourseType('borrowed', provider),
                             selectedColor: Colors.orange.shade100,
                             padding: EdgeInsets.zero,
                             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                           ActionChip(
                             label: Text(
-                              _selectedClassrooms.isEmpty
+                              provider.overviewSelectedClassrooms.isEmpty
                                   ? '教室'
-                                  : '教室(${_selectedClassrooms.length})',
+                                  : '教室(${provider.overviewSelectedClassrooms.length})',
                               style: const TextStyle(fontSize: 11),
                             ),
                             avatar: const Icon(Icons.meeting_room, size: 14),
-                            onPressed: () => _showClassroomFilterDialog(currentPageClassrooms),
+                            onPressed: () => _showClassroomFilterDialog(currentPageClassrooms, provider),
                             padding: EdgeInsets.zero,
                             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),

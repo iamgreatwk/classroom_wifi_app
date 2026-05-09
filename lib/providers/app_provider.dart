@@ -671,6 +671,124 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
+  // ========== 筛选状态（跨页面共享） ==========
+
+  /// 周总览：课程类型筛选（本科/研究生/借用）
+  Set<String> _overviewCourseTypes = {'undergraduate', 'graduate', 'borrowed'};
+  Set<String> get overviewCourseTypes => _overviewCourseTypes;
+
+  /// 周总览：教室筛选
+  Set<String> _overviewSelectedClassrooms = {};
+  Set<String> get overviewSelectedClassrooms => _overviewSelectedClassrooms;
+
+  /// 周总览：筛选区域展开状态（默认折叠）
+  bool _isOverviewFilterExpanded = false;
+  bool get isOverviewFilterExpanded => _isOverviewFilterExpanded;
+
+  /// 学期总览：课程类型筛选
+  Set<String> _semesterCourseTypes = {'undergraduate', 'graduate', 'borrowed'};
+  Set<String> get semesterCourseTypes => _semesterCourseTypes;
+
+  /// 学期总览：教室筛选
+  Set<String> _semesterSelectedClassrooms = {};
+  Set<String> get semesterSelectedClassrooms => _semesterSelectedClassrooms;
+
+  /// 学期总览：分页筛选
+  Set<String> _semesterSelectedPages = {'2楼大'};
+  Set<String> get semesterSelectedPages => _semesterSelectedPages;
+
+  /// 学期总览：周次类型筛选（单周/连续周）
+  Set<String> _semesterSelectedWeekTypes = {'single', 'continuous'};
+  Set<String> get semesterSelectedWeekTypes => _semesterSelectedWeekTypes;
+
+  /// 学期总览：筛选区域展开状态（默认折叠）
+  bool _isSemesterFilterExpanded = false;
+  bool get isSemesterFilterExpanded => _isSemesterFilterExpanded;
+
+  /// 切换周总览筛选展开状态
+  void toggleOverviewFilterExpanded() {
+    _isOverviewFilterExpanded = !_isOverviewFilterExpanded;
+    notifyListeners();
+  }
+
+  /// 切换周总览课程类型筛选
+  void toggleOverviewCourseType(String type) {
+    if (_overviewCourseTypes.contains(type)) {
+      if (_overviewCourseTypes.length > 1) {
+        _overviewCourseTypes = Set.from(_overviewCourseTypes)..remove(type);
+      }
+    } else {
+      _overviewCourseTypes = Set.from(_overviewCourseTypes)..add(type);
+    }
+    notifyListeners();
+  }
+
+  /// 设置周总览教室筛选
+  void setOverviewSelectedClassrooms(Set<String> classrooms) {
+    _overviewSelectedClassrooms = classrooms;
+    notifyListeners();
+  }
+
+  /// 切换学期总览筛选展开状态
+  void toggleSemesterFilterExpanded() {
+    _isSemesterFilterExpanded = !_isSemesterFilterExpanded;
+    notifyListeners();
+  }
+
+  /// 切换学期总览课程类型筛选
+  void toggleSemesterCourseType(String type) {
+    if (_semesterCourseTypes.contains(type)) {
+      if (_semesterCourseTypes.length > 1) {
+        _semesterCourseTypes = Set.from(_semesterCourseTypes)..remove(type);
+      }
+    } else {
+      _semesterCourseTypes = Set.from(_semesterCourseTypes)..add(type);
+    }
+    notifyListeners();
+  }
+
+  /// 切换学期总览分页筛选
+  void toggleSemesterPage(String pageName) {
+    if (_semesterSelectedPages.contains(pageName)) {
+      if (_semesterSelectedPages.length > 1) {
+        _semesterSelectedPages = Set.from(_semesterSelectedPages)..remove(pageName);
+      }
+    } else {
+      _semesterSelectedPages = Set.from(_semesterSelectedPages)..add(pageName);
+    }
+    notifyListeners();
+  }
+
+  /// 切换学期总览周次类型筛选
+  void toggleSemesterWeekType(String type) {
+    if (_semesterSelectedWeekTypes.contains(type)) {
+      if (_semesterSelectedWeekTypes.length > 1) {
+        _semesterSelectedWeekTypes = Set.from(_semesterSelectedWeekTypes)..remove(type);
+      }
+    } else {
+      _semesterSelectedWeekTypes = Set.from(_semesterSelectedWeekTypes)..add(type);
+    }
+    notifyListeners();
+  }
+
+  /// 设置学期总览教室筛选
+  void setSemesterSelectedClassrooms(Set<String> classrooms) {
+    _semesterSelectedClassrooms = classrooms;
+    notifyListeners();
+  }
+
+  /// 重置学期总览分页（当可用分页变化时）
+  void resetSemesterPages(List<String> availablePages) {
+    if (availablePages.isEmpty) return;
+    final validSelections = _semesterSelectedPages.where((p) => availablePages.contains(p)).toSet();
+    if (validSelections.isEmpty) {
+      _semesterSelectedPages = {availablePages.first};
+    } else if (validSelections.length != _semesterSelectedPages.length) {
+      _semesterSelectedPages = validSelections;
+    }
+    notifyListeners();
+  }
+
   /// 加载学期课表数据
   Future<void> loadSemesterClassrooms(List<SemesterClassroom> classrooms) async {
     _semesterClassrooms = classrooms;
