@@ -1,0 +1,48 @@
+name: Build iOS (Unsigned)
+
+on:
+  push:
+    branches: [ main, master, ios ]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.27.0'
+        channel: 'stable'
+        cache: true
+        
+    - name: Install dependencies
+      run: flutter pub get
+      
+    - name: Build iOS (no codesign)
+      run: flutter build ios --release --no-codesign
+      
+    - name: Create IPA from app
+      run: |
+        cd build/ios/iphoneos
+        mkdir -p Payload
+        cp -r Runner.app Payload/
+        zip -r ../classroom_wifi_app_unsigned.ipa Payload
+        
+    - name: Upload IPA artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-app-unsigned
+        path: build/ios/classroom_wifi_app_unsigned.ipa
+        retention-days: 30
+        
+    - name: Upload app folder (optional)
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-app-folder
+        path: build/ios/iphoneos/Runner.app
+        retention-days: 30
