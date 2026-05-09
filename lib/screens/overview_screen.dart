@@ -663,9 +663,11 @@ class _OverviewScreenState extends State<OverviewScreen> {
     // 应用有课筛选
     if (filtered) {
       sortedClassrooms = sortedClassrooms.where((classroom) {
-        return classroom.schedules.any((schedule) {
-          if (schedule.weekday != weekday) return false;
-          return _matchesCourseTypeFilter(schedule.course);
+        return classroom.schedule.values.any((daySchedule) {
+          return daySchedule.values.any((course) {
+            if (course.weekday != weekday) return false;
+            return _matchesCourseTypeFilter(course);
+          });
         });
       }).toList();
     }
@@ -786,9 +788,11 @@ class _OverviewScreenState extends State<OverviewScreen> {
     // 应用有课筛选
     if (filtered) {
       classroomsToCapture = classroomsToCapture.where((classroom) {
-        return classroom.schedules.any((schedule) {
-          if (schedule.weekday != weekday) return false;
-          return _matchesCourseTypeFilter(schedule.course);
+        return classroom.schedule.values.any((daySchedule) {
+          return daySchedule.values.any((course) {
+            if (course.weekday != weekday) return false;
+            return _matchesCourseTypeFilter(course);
+          });
         });
       }).toList();
     }
