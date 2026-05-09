@@ -1226,7 +1226,11 @@ class _OverviewScreenState extends State<OverviewScreen> {
   Future<void> _shareImageBytes(Uint8List bytes, String filename) async {
     // Web 平台不支持本地文件分享
     if (kIsWeb) {
-      debugPrint('Share not supported on Web');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Web 平台暂不支持分享功能，请使用下载按钮保存图片')),
+        );
+      }
       return;
     }
 

@@ -1726,16 +1726,15 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
     String weekday,
     int currentWeek,
   ) {
+    // 分析课程块，确保同一连续课程使用相同颜色
+    final courseBlocks = _analyzeCourseBlocks(classroom, weekday, currentWeek);
+    final blockColors = <String, Color>{};
+
     return List.generate(12, (i) {
       final period = i + 1;
-      final courses = classroom.getCoursesForPeriod(weekday, period);
-      final filteredCourses = courses.where((course) {
-        if (!_matchesCourseTypeFilter(course)) return false;
-        if (!_matchesWeekTypeFilter(course)) return false;
-        return course.hasClassInWeek(currentWeek);
-      }).toList();
+      final blockInfo = courseBlocks[period];
 
-      if (filteredCourses.isEmpty) {
+      if (blockInfo == null) {
         return Expanded(
           child: Container(
             height: 20,
@@ -1748,8 +1747,13 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
         );
       }
 
-      final course = filteredCourses.first;
-      final color = _getCourseColor(course, period);
+      final blockId = blockInfo['blockId'] as String;
+      final firstPeriod = blockInfo['firstPeriod'] as int;
+
+      if (!blockColors.containsKey(blockId)) {
+        blockColors[blockId] = _getPeriodColor(firstPeriod);
+      }
+      final color = blockColors[blockId]!;
 
       return Expanded(
         child: Container(
@@ -1941,7 +1945,11 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   Future<void> _shareImageBytes(Uint8List bytes, String filename) async {
     // Web 平台不支持本地文件分享
     if (kIsWeb) {
-      debugPrint('Share not supported on Web');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Web 平台暂不支持分享功能，请使用下载按钮保存图片')),
+        );
+      }
       return;
     }
 
@@ -3095,7 +3103,7 @@ class _SemesterScreenshotPreviewDialogState extends State<_SemesterScreenshotPre
               ],
             ),
           ),
-          // 图片区域
+          // 图片区域 - 使用 InteractiveViewer 支持缩放和拖动，使用 Scrollbar 支持滚动
           Flexible(
             child: Container(
               constraints: BoxConstraints(
@@ -3104,7 +3112,18 @@ class _SemesterScreenshotPreviewDialogState extends State<_SemesterScreenshotPre
               decoration: const BoxDecoration(
                 color: Colors.white,
               ),
-              child: _NativeImageView(dataUrl: widget.dataUrl),
+              child: Scrollbar(
+                thumbVisibility: true,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: InteractiveViewer(
+                    boundaryMargin: const EdgeInsets.all(20),
+                    minScale: 0.5,
+                    maxScale: 4.0,
+                    child: _NativeImageView(dataUrl: widget.dataUrl),
+                  ),
+                ),
+              ),
             ),
           ),
           // 底部提示
