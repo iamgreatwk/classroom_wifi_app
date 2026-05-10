@@ -51,6 +51,9 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
   /// 是否正在截图中
   bool _isCapturing = false;
 
+  /// 是否已经初始化分页
+  bool _hasInitializedPages = false;
+
   static const List<String> _weekdays = [
     '星期日',
     '星期一',
@@ -2170,8 +2173,12 @@ class _SemesterOverviewScreenState extends State<SemesterOverviewScreen> {
           final availablePages = _getAvailablePages(allClassrooms);
 
           // 如果当前选中的分页不在可用列表中，重置为默认值（使用 Provider 方法）
-          if (availablePages.isNotEmpty) {
-            provider.resetSemesterPages(availablePages);
+          // 使用 addPostFrameCallback 避免在 build 过程中调用 notifyListeners
+          if (availablePages.isNotEmpty && !_hasInitializedPages) {
+            _hasInitializedPages = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              provider.resetSemesterPages(availablePages);
+            });
           }
 
           // 应用分页筛选

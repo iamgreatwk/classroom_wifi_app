@@ -1295,12 +1295,14 @@ class _OverviewScreenState extends State<OverviewScreen> {
           }
 
           // 初始化分页选择（仅在首次加载时，确保有默认值）
+          // 使用 addPostFrameCallback 避免在 build 过程中调用 notifyListeners
           if (!_hasInitializedDefaultPage) {
-            // 如果 Provider 中没有选中任何分页，设置默认值
-            if (provider.selectedOverviewPages.isEmpty) {
-              provider.toggleOverviewPage('2楼大');
-            }
             _hasInitializedDefaultPage = true;
+            if (provider.selectedOverviewPages.isEmpty) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                provider.toggleOverviewPage('2楼大');
+              });
+            }
           }
 
           // 获取所有选中分页中的教室（合并并按编号排序）
