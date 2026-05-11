@@ -9,6 +9,7 @@ class CourseWithWeek {
   final String? rawText;
   final String classroom;
   final int? studentCount; // 上课人数
+  final List<int>? weeksList; // 完整的周次列表（用于非连续周次）
 
   CourseWithWeek({
     required this.name,
@@ -20,6 +21,7 @@ class CourseWithWeek {
     this.rawText,
     required this.classroom,
     this.studentCount,
+    this.weeksList,
   });
 
   /// 获取显示名称
@@ -42,7 +44,11 @@ class CourseWithWeek {
   bool get isSingleWeek => startWeek == endWeek;
 
   /// 检查课程是否在指定周次有课
+  /// 如果 weeksList 存在，使用列表精确匹配；否则使用 startWeek/endWeek 范围
   bool hasClassInWeek(int week) {
+    if (weeksList != null && weeksList!.isNotEmpty) {
+      return weeksList!.contains(week);
+    }
     return week >= startWeek && week <= endWeek;
   }
 

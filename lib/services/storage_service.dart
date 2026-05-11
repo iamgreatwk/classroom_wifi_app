@@ -265,6 +265,7 @@ class StorageService {
       'rawText': course.rawText,
       'classroom': course.classroom,
       'studentCount': course.studentCount,
+      'weeksList': course.weeksList,
     };
   }
 
@@ -280,6 +281,7 @@ class StorageService {
       rawText: json['rawText'] as String?,
       classroom: json['classroom'] as String,
       studentCount: json['studentCount'] as int?,
+      weeksList: (json['weeksList'] as List?)?.map((e) => e as int).toList(),
     );
   }
 }

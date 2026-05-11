@@ -147,6 +147,7 @@ class SemesterJsonParser {
           startWeek: startWeek,
           endWeek: endWeek,
           classroomName: classroom.name,
+          weeksList: weeks,
         );
         classroom.addCourse(weekday, period, course);
       }
@@ -162,6 +163,7 @@ class SemesterJsonParser {
     required int startWeek,
     required int endWeek,
     required String classroomName,
+    List<int>? weeksList,
   }) {
     // 获取课程名称
     String courseName;
@@ -203,6 +205,7 @@ class SemesterJsonParser {
       rawText: rawText,
       classroom: classroomName,
       studentCount: studentCount,
+      weeksList: weeksList,
     );
   }
 
