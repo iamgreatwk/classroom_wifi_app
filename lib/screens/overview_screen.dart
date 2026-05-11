@@ -1133,6 +1133,33 @@ class _OverviewScreenState extends State<OverviewScreen> {
     }
   }
 
+  /// 获取经过筛选的教室列表（应用分页、教室筛选、课程类型筛选）
+  List<Classroom> _getFilteredClassrooms(AppProvider provider) {
+    // 获取当前显示的教室列表（应用分页筛选）
+    final pages = _getFilteredPages(provider.classrooms, provider);
+    final selectedPages = provider.selectedOverviewPages;
+    final allSelectedClassrooms = <Classroom>[];
+    for (final page in pages) {
+      if (selectedPages.contains(page.key)) {
+        allSelectedClassrooms.addAll(page.value);
+      }
+    }
+    final seen = <String>{};
+    var filteredClassrooms = allSelectedClassrooms
+        .where((c) => seen.add(c.name))
+        .toList();
+
+    // 应用教室筛选
+    final selectedClassrooms = provider.overviewSelectedClassrooms;
+    if (selectedClassrooms.isNotEmpty) {
+      filteredClassrooms = filteredClassrooms
+          .where((c) => selectedClassrooms.contains(c.name))
+          .toList();
+    }
+
+    return filteredClassrooms;
+  }
+
   /// 分析第7、8节课程并复制到粘贴板
   /// 筛选第7、8节老师不同的课程，生成格式：
   /// "15：40 需要优先擦黑板的教室有：xxx、xxx、xxx"
@@ -1140,7 +1167,8 @@ class _OverviewScreenState extends State<OverviewScreen> {
   /// "另外，xxx、xxx教室课程变化但老师不变，按老师要求擦黑板"
   void _copyBlackboardText(AppProvider provider) {
     final weekday = ExcelParserService.getWeekdayName(_selectedDate);
-    final classrooms = provider.classrooms;
+    // 使用筛选后的教室列表
+    final classrooms = _getFilteredClassrooms(provider);
 
     // 筛选有第7、8节课程的教室
     final teacherDifferentClassrooms = <String>[]; // 老师不同的教室
